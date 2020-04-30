@@ -7,7 +7,7 @@
 This library helps you organize and track
  machine learning experiments.
  
-**💬 [Documentation](http://lab-ml.com/3.0)**
+**📚 [Documentation](http://lab-ml.com/3.0)**
 
 **💬 [Slack workspace for discussions](https://join.slack.com/t/labforml/shared_invite/zt-cg5iui5u-4cJPT7DUwRGqup9z8RHwhQ)**	
 
