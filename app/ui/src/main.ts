@@ -1,32 +1,26 @@
-import {Integrations, Sentry} from './sentry'
-
 import {ROUTER} from './app'
 import {RunHandler} from './views/run_view'
 import {PageNotFoundHandler} from './views/errors/page_not_found_view'
 import {RunsListHandler} from './views/runs_list_view'
 import {SessionsListHandler} from './views/sessions_list_view'
-import {LoginHandler} from './views/login_view'
 import {SettingsHandler} from './views/settings_view'
 
-import {experimentAnalyses, sessionAnalyses} from "./analyses/analyses"
+import {experimentAnalyses, metricAnalyses, sessionAnalyses} from "./analyses/analyses"
 import {ProcessDetailsHandler} from "./analyses/sessions/process/detail_view"
 import {RunHeaderHandler} from "./analyses/experiments/run_header/view"
 import {SessionHeaderHandler} from "./analyses/sessions/session_header/view"
 import {SessionHandler} from './views/session_view'
-import {SENTRY_DSN} from './env'
 import {AuthErrorHandler} from './views/errors/auth_error_view'
-import {OtherErrorHandler} from './views/errors/other_error_view'
+import {MiscErrorHandler} from './views/errors/other_error_view'
 import {NetworkErrorHandler} from './views/errors/network_error_view'
 
 ROUTER.route(/^(.*)$/g, [() => {
     ROUTER.navigate('/404')
 }])
 
-new LoginHandler()
-
 new PageNotFoundHandler()
 new AuthErrorHandler()
-new OtherErrorHandler()
+new MiscErrorHandler()
 new NetworkErrorHandler()
 
 new RunHandler()
@@ -49,6 +43,10 @@ ROUTER.route('cordova', [() => {
     window.localStorage.setItem('platform', 'cordova')
     ROUTER.navigate('/runs')
 }])
+
+metricAnalyses.map((analysis, i) => {
+    new analysis.viewHandler()
+})
 
 experimentAnalyses.map((analysis, i) => {
     new analysis.viewHandler()
@@ -73,16 +71,6 @@ if (
 // Ref: https://developer.apple.com/library/archive/documentation/AppleApplications/Reference/SafariWebContent/AdjustingtheTextSize/AdjustingtheTextSize.html
 document.addEventListener("touchstart", () => {
 }, true);
-
-if (SENTRY_DSN) {
-    Sentry.init({
-        dsn: SENTRY_DSN,
-        integrations: [
-            new Integrations.BrowserTracing(),
-        ],
-        tracesSampleRate: 1.0,
-    })
-}
 
 (window as any).handleOpenURL = function (url) {
     window.location.hash = `#${url.split('#')[1]}`

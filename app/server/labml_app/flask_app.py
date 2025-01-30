@@ -1,19 +1,23 @@
 import git
-import os
 import logging
+import os
 import time
-from pathlib import Path
-from time import strftime
-
 import uvicorn
 from fastapi import FastAPI, Request, Response
 from fastapi.logger import logger as flogger
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from pathlib import Path
+from time import strftime
 
+from starlette.responses import JSONResponse
+
+from labml_app import db
 from labml_app import handlers
 from labml_app.logger import logger
-from labml_app import db
+from labml_app.settings import WEB_URL, IS_LOCAL_SETUP, IS_DEBUG
+
+import traceback
 
 
 def get_static_path():
@@ -42,7 +46,7 @@ def create_app():
 
     _app = FastAPI()
 
-    db.init_db()
+    db.init_mongo_db()
 
     def run_on_start():
         logger.info('initializing labml_app')
@@ -50,7 +54,8 @@ def create_app():
         try:
             repo = git.Repo(search_parent_directories=True)
             sha = repo.head.object.hexsha
-            logger.error(f'THIS IS NOT AN ERROR: Server Deployed SHA : {sha}')
+            if not IS_LOCAL_SETUP:
+                logger.error(f'THIS IS NOT AN ERROR: Server Deployed SHA : {sha}')
         except git.InvalidGitRepositoryError:
             pass
 
@@ -63,7 +68,7 @@ app = create_app()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=['https://app.labml.ai'],
+    allow_origins=['https://app.labml.ai', WEB_URL],
     allow_methods=["*"],
     allow_headers=["*"],
     allow_credentials=True,
@@ -111,5 +116,19 @@ async def log_process_time(request: Request, call_next):
     return response
 
 
+@app.middleware("http")
+async def error_handling_middleware(request: Request, call_next):
+    try:
+        response = await call_next(request)
+        return response
+    except Exception as e:
+        stacktrace = traceback.format_exc()
+        logger.error(stacktrace)
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e), "trace": stacktrace},
+        )
+
+
 if __name__ == '__main__':
-    uvicorn.run(app, host='0.0.0.0', port=5005)
+    uvicorn.run("labml_app.flask_app:app", host='0.0.0.0', port=5005, workers=1)

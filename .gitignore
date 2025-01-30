@@ -15,9 +15,12 @@ build/
 
 **/.idea/*
 **/!.idea/dictionaries
+*.iml
 
 .labml.yaml
 
 **/.remote/scripts
 **/.remote/private_key
 **/.remote/configs.yaml
+
+**/.vscode

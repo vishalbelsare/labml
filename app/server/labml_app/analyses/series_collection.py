@@ -27,29 +27,24 @@ class SeriesCollection:
             series: Dict[str, Any] = s.detail
             series['name'] = '.'.join(name[1:])
 
-            if s.is_smoothed_updated:
-                self.tracking[ind] = s.to_data()
-                is_series_updated = True
-
             res.append(series)
-
-        if is_series_updated:
-            self.save()
 
         return res
 
-    def track(self, data: Dict[str, SeriesModel]) -> None:
+    def track(self, data: Dict[str, SeriesModel], keep_last_24h: bool = False) -> int:
         for ind, series in data.items():
             self.step = max(self.step, series['step'][-1])
-            self._update_series(ind, series)
+            self._update_series(ind, series, keep_last_24h)
 
         self.save()
 
-    def _update_series(self, ind: str, series: SeriesModel) -> None:
-        if ind not in self.tracking:
-            self.tracking[ind] = Series(self.max_buffer_length).to_data()
+        return self.step
 
-        s = Series(self.max_buffer_length).load(self.tracking[ind])
+    def _update_series(self, ind: str, series: SeriesModel, keep_last_24h: bool) -> None:
+        if ind not in self.tracking:
+            self.tracking[ind] = Series(self.max_buffer_length, keep_last_24h).to_data()
+
+        s = Series(self.max_buffer_length, keep_last_24h).load(self.tracking[ind])
         s.update(series['step'], series['value'])
 
         self.tracking[ind] = s.to_data()

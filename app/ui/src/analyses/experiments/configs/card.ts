@@ -26,6 +26,10 @@ export class RunConfigsCard extends Card {
         })
     }
 
+    cardName(): string {
+        return 'Run Configs'
+    }
+
     getLastUpdated(): number {
         return this.runCache.lastUpdated
     }
@@ -65,7 +69,7 @@ export class RunConfigsCard extends Card {
     renderConfigs() {
         this.configsContainer.innerHTML = ''
         $(this.configsContainer, $ => {
-            new Configs({configs: this.run.configs, width: this.width, isHyperParamOnly: true}).render($)
+            new Configs({configs: this.run.configs, width: this.width, isSummary: true}).render($)
         })
     }
 

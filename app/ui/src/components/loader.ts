@@ -1,6 +1,8 @@
 import {Weya, WeyaElement, WeyaElementFunction} from '../../../lib/weya/weya'
 import {ErrorMessage} from './error_message'
 import {waitForFrame} from '../utils/render'
+import {NetworkError} from "../network"
+import {errorToString} from "../utils/value"
 
 export class Loader {
     elem: WeyaElement
@@ -37,6 +39,14 @@ export class Loader {
         this.elem.remove()
         this.elem = null
     }
+
+    public hide(isHide: boolean) {
+        if (isHide) {
+            this.elem.style.display = 'none'
+        } else {
+            this.elem.style.display = 'block'
+        }
+    }
 }
 
 export class DataLoader {
@@ -60,6 +70,9 @@ export class DataLoader {
     async load(force: boolean = false) {
         this.errorMessage.remove()
         if (!this.loaded) {
+            if (this.elem == null) {
+                throw new Error("Loader is not rendered")
+            }
             this.elem.appendChild(this.loader.render(Weya))
             await waitForFrame()
         }
@@ -69,10 +82,21 @@ export class DataLoader {
             this.loaded = true
         } catch (e) {
             this.loaded = false
-            this.errorMessage.render(this.elem)
+            if (e instanceof NetworkError) {
+                this.errorMessage = new ErrorMessage("Server Error", e.toString())
+                this.errorMessage.render(this.elem)
+            } else {
+                this.errorMessage = new ErrorMessage("Error", errorToString(e))
+                this.errorMessage.render(this.elem)
+            }
+            console.log(e)
             throw e
         } finally {
             this.loader.remove()
         }
+    }
+
+    public removeErrorMessage() {
+        this.errorMessage.remove()
     }
 }

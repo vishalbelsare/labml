@@ -1,41 +1,37 @@
 import {Weya as $, WeyaElement} from "../../../../../lib/weya/weya"
 import {ROUTER, SCREEN} from "../../../app"
 import {Run} from "../../../models/run"
-import CACHE, {IsUserLoggedCache, RunCache, RunsListCache, RunStatusCache} from "../../../cache/cache"
+import CACHE, {DataStoreCache, RunCache, RunStatusCache, UserCache} from "../../../cache/cache"
 import {Status} from "../../../models/status"
-import {
-    BackButton,
-    CancelButton,
-    CleanButton,
-    DeleteButton,
-    EditButton,
-    SaveButton,
-    TensorBoardButton
-} from "../../../components/buttons"
+import {BackButton, DeleteButton, SaveButton,} from "../../../components/buttons"
 import EditableField from "../../../components/input/editable_field"
 import {formatTime, getTimeDiff} from "../../../utils/time"
 import {DataLoader} from "../../../components/loader"
-import {BadgeView} from "../../../components/badge"
 import {StatusView} from "../../../components/status"
-import mix_panel from "../../../mix_panel"
-import {IsUserLogged} from '../../../models/user'
-import {handleNetworkError, handleNetworkErrorInplace} from '../../../utils/redirect'
+import {handleNetworkErrorInplace} from '../../../utils/redirect'
 import {setTitle} from '../../../utils/document'
-import {UserMessages} from "../../../components/user_messages"
-import {openInNewTab} from "../../../utils/new_tab"
 import {formatFixed} from "../../../utils/value"
 import {ScreenView} from '../../../screen_view'
+import {User} from '../../../models/user'
+import {UserMessages} from "../../../components/user_messages"
+import {DataStore} from "../../../models/data_store";
+
+enum EditStatus {
+    NOCHANGE,
+    SAVING,
+    CHANGE
+}
 
 class RunHeaderView extends ScreenView {
     elem: HTMLDivElement
     run: Run
     runCache: RunCache
-    runListCache: RunsListCache
     status: Status
     statusCache: RunStatusCache
-    isUserLogged: IsUserLogged
-    isUserLoggedCache: IsUserLoggedCache
-    isEditMode: boolean
+    user: User
+    userCache: UserCache
+    dataStoreCache: DataStoreCache
+    dataStore: DataStore
     uuid: string
     actualWidth: number
     isProjectRun: boolean = false
@@ -45,46 +41,50 @@ class RunHeaderView extends ScreenView {
     commentField: EditableField
     noteField: EditableField
     sizeField: EditableField
+    tagField: EditableField
+    dataStoreField: EditableField
     sizeCheckPoints: EditableField
     sizeTensorBoard: EditableField
     private deleteButton: DeleteButton
-    private cleanButton: CleanButton
-    private startTBButton: TensorBoardButton
-    private userMessages: UserMessages
+    private saveButton: SaveButton
     private loader: DataLoader
 
     constructor(uuid: string) {
         super()
         this.uuid = uuid
         this.runCache = CACHE.getRun(this.uuid)
-        this.runListCache = CACHE.getRunsList()
         this.statusCache = CACHE.getRunStatus(this.uuid)
-        this.isUserLoggedCache = CACHE.getIsUserLogged()
-        this.isEditMode = false
+        this.userCache = CACHE.getUser()
+        this.dataStoreCache = CACHE.getDataStore(this.uuid)
 
         this.deleteButton = new DeleteButton({onButtonClick: this.onDelete.bind(this), parent: this.constructor.name})
-        this.cleanButton = new CleanButton({
-            onButtonClick: this.onCleaningCheckPoints.bind(this),
-            parent: this.constructor.name
-        })
-        this.startTBButton = new TensorBoardButton({
-            onButtonClick: this.onStartTensorBoard.bind(this),
-            parent: this.constructor.name,
-        })
-
-        this.userMessages = new UserMessages()
-
         this.loader = new DataLoader(async (force) => {
             this.status = await this.statusCache.get(force)
             this.run = await this.runCache.get(force)
-            this.isUserLogged = await this.isUserLoggedCache.get(force)
+            this.user = await this.userCache.get(force)
+            this.dataStore = await this.dataStoreCache.get(force)
         })
 
-        mix_panel.track('Analysis View', {uuid: this.uuid, analysis: this.constructor.name})
+        this.editStatus = EditStatus.NOCHANGE
     }
 
     get requiresAuth(): boolean {
         return false
+    }
+
+    set editStatus(value: EditStatus) {
+        if (this.saveButton) {
+            if (value === EditStatus.CHANGE) {
+                this.saveButton.disabled = false
+                this.saveButton.loading = false
+            } else if (value === EditStatus.SAVING) {
+                this.saveButton.disabled = true
+                this.saveButton.loading = true
+            } else {
+                this.saveButton.disabled = true
+                this.saveButton.loading = false
+            }
+        }
     }
 
     onResize(width: number) {
@@ -105,23 +105,12 @@ class RunHeaderView extends ScreenView {
                 {style: {width: `${this.actualWidth}px`}},
                 $ => {
                     $('div', $ => {
-                        this.userMessages.render($)
                         $('div', '.nav-container', $ => {
                             new BackButton({text: 'Run', parent: this.constructor.name}).render($)
-                            if (this.isEditMode) {
-                                new CancelButton({
-                                    onButtonClick: this.onToggleEdit,
-                                    parent: this.constructor.name
-                                }).render($)
-                                new SaveButton({onButtonClick: this.updateRun, parent: this.constructor.name}).render($)
-                                this.deleteButton.render($)
-                                this.deleteButton.hide(true)
-                            } else {
-                                new EditButton({
-                                    onButtonClick: this.onToggleEdit,
-                                    parent: this.constructor.name
-                                }).render($)
-                            }
+                            this.saveButton = new SaveButton({onButtonClick: this.updateRun, parent: this.constructor.name, isDisabled: true})
+                            this.saveButton.render($)
+                            this.deleteButton.render($)
+                            this.deleteButton.hide(true)
                             this.computerButtonsContainer = $('span')
                         })
                         $('h2', '.header.text-center', 'Run Details')
@@ -135,7 +124,6 @@ class RunHeaderView extends ScreenView {
             await this.loader.load()
 
             setTitle({section: 'Run Details', item: this.run.name})
-            this.renderComputerButtons()
             this.renderFields()
         } catch (e) {
             handleNetworkErrorInplace(e)
@@ -159,31 +147,40 @@ class RunHeaderView extends ScreenView {
                 this.nameField = new EditableField({
                     name: 'Run Name',
                     value: this.run.name,
-                    isEditable: this.isEditMode
+                    isEditable: true,
+                    onChange: this.onInputChange.bind(this)
                 })
                 this.nameField.render($)
+                new EditableField({
+                    name: 'Rank',
+                    value: this.run.rank,
+                }).render($)
+                new EditableField({
+                    name: 'World Size',
+                    value: this.run.world_size,
+                }).render($)
                 this.commentField = new EditableField({
                     name: 'Comment',
                     value: this.run.comment,
-                    isEditable: this.isEditMode
+                    isEditable: true,
+                    onChange: this.onInputChange.bind(this)
                 })
                 this.commentField.render($)
-                $(`li`, $ => {
-                    $('span', '.item-key', 'Tags')
-                    $('span', '.item-value', $ => {
-                        $('div', $ => {
-                            this.run.tags.map((tag, idx) => (
-                                new BadgeView({text: tag}).render($)
-                            ))
-                        })
-                    })
+                this.tagField = new EditableField({
+                    name: 'Tags',
+                    value: this.run.tags.join(', '),
+                    placeholder: 'Add tags separated by comma',
+                    isEditable: true,
+                    onChange: this.onInputChange.bind(this)
                 })
+                this.tagField.render($)
                 this.noteField = new EditableField({
                     name: 'Note',
                     value: this.run.note,
                     placeholder: 'write your note here',
                     numEditRows: 5,
-                    isEditable: this.isEditMode
+                    isEditable: true,
+                    onChange: this.onInputChange.bind(this)
                 })
                 this.noteField.render($)
                 $(`li`, $ => {
@@ -252,30 +249,38 @@ class RunHeaderView extends ScreenView {
                     name: 'Commit Message',
                     value: this.run.commit_message
                 }).render($)
+
+                this.dataStoreField = new EditableField({
+                    name: 'Data Store',
+                    value: JSON.stringify(this.dataStore.yamlString),
+                    isEditable: true,
+                    onChange: this.onInputChange.bind(this),
+                    numEditRows: 10
+                })
+                this.dataStoreField.render($)
             })
         })
-        this.deleteButton.hide(!(this.isUserLogged.is_user_logged && this.run.is_claimed))
+        this.deleteButton.hide(!(this.user.is_complete && this.run.is_claimed))
     }
 
-    onToggleEdit = () => {
-        this.isEditMode = !this.isEditMode
-
-        this._render().then()
+    onInputChange(_: string) {
+        this.editStatus = EditStatus.CHANGE
     }
 
     onDelete = async () => {
         if (confirm("Are you sure?")) {
             try {
                 await CACHE.getRunsList().deleteRuns([this.uuid])
+                ROUTER.navigate('/runs')
             } catch (e) {
-                handleNetworkError(e)
+                UserMessages.shared.networkError(e, "Failed to delete run")
                 return
             }
-            ROUTER.navigate('/runs')
         }
     }
 
-    updateRun = () => {
+    updateRun = async () => {
+        this.editStatus = EditStatus.SAVING
         if (this.nameField.getInput()) {
             this.run.name = this.nameField.getInput()
         }
@@ -288,81 +293,44 @@ class RunHeaderView extends ScreenView {
             this.run.note = this.noteField.getInput()
         }
 
-        this.runCache.setRun(this.run).then()
-        this.onToggleEdit()
-    }
+        this.run.tags = this.tagField.getInput().split(',').map(tag => tag.trim())
+        this.run.tags = this.run.tags.filter(tag => tag.length > 0)
 
-    renderComputerButtons() {
-        this.computerButtonsContainer.innerHTML = ''
-        $(this.computerButtonsContainer, $ => {
-            if (this.run.size_tensorboard && this.run.is_project_run) {
-                $('span', '.float-right', $ => {
-                    this.startTBButton.render($)
-                    this.startTBButton.isLoading = false
-                })
-            }
-
-            if (this.run.size_checkpoints && this.run.is_project_run) {
-                this.cleanButton.render($)
-                this.cleanButton.isLoading = false
-            }
-        })
-    }
-
-    async onCleaningCheckPoints() {
-        this.userMessages.hide(true)
-        this.cleanButton.disabled = true
-        this.cleanButton.isLoading = true
-
-        try {
-            let job = await this.runListCache.clearCheckPoints(this.run.computer_uuid, [this.run.run_uuid])
-
-            if (job.isSuccessful) {
-                let size_checkpoints = job.data['runs'][0]['size_checkpoints']
-                this.sizeCheckPoints.updateValue(formatFixed(size_checkpoints, 1))
-                this.userMessages.success('Successfully cleaned the checkpoints')
-            } else if (job.isComputerOffline) {
-                this.userMessages.warning('Your computer is currently offline')
-            } else {
-                this.userMessages.warning('Error occurred while cleaning checkpoints')
-            }
-        } catch (e) {
-            this.userMessages.networkError()
+        let data = {
+            'name': this.run.name,
+            'comment': this.run.comment,
+            'note': this.run.note,
+            'tags': this.run.tags
         }
 
-        this.cleanButton.disabled = false
-        this.cleanButton.isLoading = false
-    }
-
-    async onStartTensorBoard() {
-        this.userMessages.hide(true)
-        this.startTBButton.disabled = true
-        this.startTBButton.isLoading = true
-
         try {
-            let job = await this.runListCache.startTensorBoard(this.run.computer_uuid, [this.run.run_uuid])
-            let url = job.data['url']
-
-            if (job.isSuccessful && url) {
-                let message = job.data['message']
-                this.userMessages.success(message)
-                openInNewTab(url, this.userMessages)
-            } else if (job.isComputerOffline) {
-                this.userMessages.warning('Your computer is currently offline')
-            } else if (job.isFailed) {
-                let message = job.data['message']
-                this.userMessages.warning(`Failed to start TensorBoard: ${message}`)
-            } else if (job.isTimeOut) {
-                this.userMessages.warning(`Timeout occurred while starting TensorBoard`)
-            } else {
-                this.userMessages.warning('Error occurred while starting TensorBoard')
-            }
+            await this.runCache.updateRunData(data)
+            await CACHE.getRunsList().localUpdateRun(this.run)
         } catch (e) {
-            this.userMessages.networkError()
+            this.editStatus = EditStatus.CHANGE
+            UserMessages.shared.networkError(e, "Failed to save run")
+            return
         }
 
-        this.startTBButton.disabled = false
-        this.startTBButton.isLoading = false
+        let dataStore: any
+        try {
+            dataStore = JSON.parse(this.dataStoreField.getInput())
+        } catch (e) {
+            this.editStatus = EditStatus.CHANGE
+            UserMessages.shared.error("Data Store is not a valid JSON")
+            return
+        }
+
+        try {
+            this.dataStore = await this.dataStoreCache.update(dataStore)
+        } catch (e) {
+            this.editStatus = EditStatus.CHANGE
+            UserMessages.shared.networkError(e, "Failed to save data store")
+            return
+        }
+
+        await this._render()
+        this.editStatus = EditStatus.NOCHANGE
     }
 }
 

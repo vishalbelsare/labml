@@ -1,22 +1,21 @@
-import sys
-import inspect
 import asyncio
-from typing import Callable, Dict, Any
+import inspect
+import sys
+from typing import Callable, Dict, Any, Optional
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from .analyses.experiments import stdout, stderr, stdlogger
 from .logger import logger
 from . import settings
 from . import auth
 from .db import run
 from .db import computer
 from .db import session
-from .db import app_token
 from .db import user
 from .db import project
-from .db import blocked_uuids
-from .db import job
+from .db import status
 from . import utils
 from . import analyses
 
@@ -26,6 +25,8 @@ except ImportError:
     pass
 
 EndPointRes = Dict[str, Any]
+UNKNOWN_ERROR_MESSAGE = 'Something went wrong. Please try again later. If the problem persists, please reach us via ' \
+                        'contact@labml.ai'
 
 
 def _is_new_run_added(request: Request) -> bool:
@@ -37,55 +38,11 @@ def _is_new_run_added(request: Request) -> bool:
     return is_run_added
 
 
-def _get_user_profile(token: str):
-    res = requests.get(f'{settings.AUTH0_DOMAIN}/userinfo', headers={'Authorization': f'Bearer {token}'})
-
-    return res.json()
-
-
-@utils.analytics.AnalyticsEvent.time_this(None)
-async def sign_in(request: Request) -> EndPointRes:
-    json = await request.json()
-    if 'token' in json:
-        user_profile = _get_user_profile(json['token'])
-
-        u = user.get_or_create_user(user.AuthOInfo(
-            **{k: user_profile.get(k, '') for k in ('name', 'email', 'sub', 'email_verified', 'picture')}))
-    else:
-        u = user.get_or_create_user(user.AuthOInfo(**json))
-
-    utils.analytics.AnalyticsEvent.people_set(identifier=u.email, first_name=u.name, last_name='', email=u.email)
-
-    token_id = ''  # generate different token for every login
-    at = app_token.get_or_create(token_id)
-
-    at.user = u.key
-    at.save()
-
-    return {'is_successful': True, 'app_token': at.token_id}
-
-
-@utils.analytics.AnalyticsEvent.time_this(None)
-async def sign_out(request: Request) -> EndPointRes:
-    token_id = request.headers.get('Authorization', '')
-    at = app_token.get_or_create(token_id)
-
-    app_token.delete(at)
-
-    return {'is_successful': True}
-
-
-@utils.analytics.AnalyticsEvent.time_this(0.4)
-async def _update_run(request: Request, labml_token: str, run_uuid: str, labml_version: str):
+async def _update_run(request: Request, labml_token: str, labml_version: str, run_uuid: str, rank: int,
+                      world_size: int, main_rank: int):
     errors = []
 
     token = labml_token
-
-    if blocked_uuids.is_run_blocked(run_uuid):
-        error = {'error': 'blocked_run_uuid',
-                 'message': f'Blocked or deleted run, uuid:{run_uuid}'}
-        errors.append(error)
-        return {'errors': errors}
 
     if len(run_uuid) < 10:
         error = {'error': 'invalid_run_uuid',
@@ -117,7 +74,10 @@ async def _update_run(request: Request, labml_token: str, run_uuid: str, labml_v
                                       'Click on the experiment link to monitor the experiment and '
                                       'add it to your experiments list.'})
 
-    r = run.get_or_create(request, run_uuid, token)
+    if world_size > 1 and rank > 0:
+        run_uuid = f'{run_uuid}_{rank}'
+
+    r = run.get_or_create(request, run_uuid, rank, world_size, main_rank, token)
     s = r.status.load()
 
     json = await request.json()
@@ -128,46 +88,53 @@ async def _update_run(request: Request, labml_token: str, run_uuid: str, labml_v
 
     for d in data:
         r.update_run(d)
-        s.update_time_status(d)
         if 'track' in d:
-            analyses.AnalysisManager.track(run_uuid, d['track'])
+            last_step = analyses.AnalysisManager.track(run_uuid, d['track'])
+            s.update_time_status(d, last_step)
 
-    if r.is_sync_needed or not r.is_in_progress:
-        c = computer.get_or_create(r.computer_uuid)
-        try:
-            c.create_job(job.JobMethods.CALL_SYNC, {})
-        except AssertionError as e:
-            logger.debug(f'error while creating CALL_SYNC : {e}')
+        if 'stdout' in d and d['stdout']:
+            stdout.update_stdout(run_uuid, d['stdout'])
+        if 'stderr' in d and d['stderr']:
+            stderr.update_stderr(run_uuid, d['stderr'])
+        if 'logger' in d and d['logger']:
+            stdlogger.update_std_logger(run_uuid, d['logger'])
 
-    hp_values = analyses.AnalysisManager.get_experiment_analysis('HyperParamsAnalysis', run_uuid).get_hyper_params()
+    hp_values = analyses.AnalysisManager.get_experiment_analysis('HyperParamsAnalysis', run_uuid)
+    if hp_values is not None:
+        hp_values.get_hyper_params()
+    else:
+        hp_values = {}
 
-    return {'errors': errors, 'url': r.url, 'dynamic': hp_values}
+    run_uuid = r.url
+    if len(run_uuid.split("_")) == 2:
+        run_uuid = run_uuid.split("_")[0]
+
+    app_url = str(request.url).split('api')[0]
+
+    return {'errors': errors, 'url': f'{app_url}{run_uuid}', 'dynamic': hp_values}
 
 
 async def update_run(request: Request) -> EndPointRes:
     labml_token = request.query_params.get('labml_token', '')
-    run_uuid = request.query_params.get('run_uuid', '')
     labml_version = request.query_params.get('labml_version', '')
 
-    res = await _update_run(request, labml_token, run_uuid, labml_version)
+    run_uuid = request.query_params.get('run_uuid', '')
+    rank = int(request.query_params.get('rank', 0))
+    world_size = int(request.query_params.get('world_size', 0))
+    main_rank = int(request.query_params.get('main_rank', 0))
+
+    res = await _update_run(request, labml_token, labml_version, run_uuid, rank, world_size, main_rank)
 
     await asyncio.sleep(3)
 
     return res
 
 
-@utils.analytics.AnalyticsEvent.time_this(0.4)
 async def _update_session(request: Request, labml_token: str, session_uuid: str, computer_uuid: str,
                           labml_version: str):
     errors = []
 
     token = labml_token
-
-    if blocked_uuids.is_session_blocked(session_uuid):
-        error = {'error': 'blocked_session_uuid',
-                 'message': f'Blocked or deleted session, uuid:{session_uuid}'}
-        errors.append(error)
-        return {'errors': errors}
 
     if len(computer_uuid) < 10:
         error = {'error': 'invalid_computer_uuid',
@@ -216,14 +183,16 @@ async def _update_session(request: Request, labml_token: str, session_uuid: str,
 
     for d in data:
         c.update_session(d)
-        s.update_time_status(d)
+        s.update_time_status(d, None)
         if 'track' in d:
             analyses.AnalysisManager.track_computer(session_uuid, d['track'])
 
     logger.debug(
         f'update_session, session_uuid: {session_uuid}, size : {sys.getsizeof(str(request.json)) / 1024} Kb')
 
-    return {'errors': errors, 'url': c.url}
+    app_url = str(request.url).split('api')[0]
+
+    return {'errors': errors, 'url': f'{app_url}session/{session_uuid}'}
 
 
 async def update_session(request: Request) -> EndPointRes:
@@ -239,43 +208,31 @@ async def update_session(request: Request) -> EndPointRes:
     return res
 
 
-@utils.analytics.AnalyticsEvent.time_this(None)
-async def claim_run(request: Request, run_uuid: str) -> EndPointRes:
+@auth.login_required
+async def claim_run(request: Request, run_uuid: str, token: Optional[str] = None) -> EndPointRes:
     r = run.get(run_uuid)
-    at = auth.get_app_token(request)
+    u = user.get_by_session_token(token)
 
-    if not at.user:
-        return {'is_successful': False}
-
-    u = at.user.load()
     default_project = u.default_project
 
-    if r.run_uuid not in default_project.runs:
-        float_project = project.get_project(labml_token=settings.FLOAT_PROJECT_TOKEN)
+    if not default_project.is_project_run(run_uuid):
+        # float_project = project.get_project(labml_token=settings.FLOAT_PROJECT_TOKEN)
 
-        if r.run_uuid in float_project.runs:
-            default_project.runs[r.run_uuid] = r.key
-            default_project.is_run_added = True
-            default_project.save()
-            r.is_claimed = True
-            r.owner = u.email
-            r.save()
-
-            utils.analytics.AnalyticsEvent.track(request, 'run_claimed', {'run_uuid': r.run_uuid})
-            utils.analytics.AnalyticsEvent.run_claimed_set(u.email)
+        # if r.run_uuid in float_project.runs:
+        default_project.add_run_with_model(r)
+        default_project.save()
+        r.is_claimed = True
+        r.owner = u.email
+        r.save()
 
     return {'is_successful': True}
 
 
-@utils.analytics.AnalyticsEvent.time_this(None)
-async def claim_session(request: Request, session_uuid: str) -> EndPointRes:
+@auth.login_required
+async def claim_session(request: Request, session_uuid: str, token: Optional[str] = None) -> EndPointRes:
     c = session.get(session_uuid)
-    at = auth.get_app_token(request)
+    u = user.get_by_session_token(token)
 
-    if not at.user:
-        return {'is_successful': False}
-
-    u = at.user.load()
     default_project = u.default_project
 
     if c.session_uuid not in default_project.sessions:
@@ -288,20 +245,20 @@ async def claim_session(request: Request, session_uuid: str) -> EndPointRes:
             c.owner = u.email
             c.save()
 
-            utils.analytics.AnalyticsEvent.track(request, 'session_claimed', {'session_uuid': c.session_uuid})
-            utils.analytics.AnalyticsEvent.computer_claimed_set(u.email)
-
     return {'is_successful': True}
 
 
-@utils.analytics.AnalyticsEvent.time_this(None)
 async def get_run(request: Request, run_uuid: str) -> JSONResponse:
     run_data = {}
     status_code = 404
 
+    # TODO temporary change to used run_uuid as rank 0
+    is_dist_run = len(run_uuid.split("_")) == 1
+    run_uuid = utils.get_true_run_uuid(run_uuid)
+
     r = run.get(run_uuid)
     if r:
-        run_data = r.get_data(request)
+        run_data = r.get_data(request, is_dist_run)
         status_code = 200
 
     response = JSONResponse(run_data)
@@ -310,7 +267,6 @@ async def get_run(request: Request, run_uuid: str) -> JSONResponse:
     return response
 
 
-@utils.analytics.AnalyticsEvent.time_this(None)
 async def get_session(request: Request, session_uuid: str) -> JSONResponse:
     session_data = {}
     status_code = 404
@@ -327,17 +283,13 @@ async def get_session(request: Request, session_uuid: str) -> JSONResponse:
 
 
 @auth.login_required
-async def edit_run(request: Request, run_uuid: str) -> EndPointRes:
-    r = run.get(run_uuid)
-    errors = []
+async def edit_run(request: Request, run_uuid: str, token: Optional[str] = None) -> EndPointRes:
+    json = await request.json()
 
-    if r:
-        data = await request.json()
-        r.edit_run(data)
-    else:
-        errors.append({'edit_run': 'invalid run uuid'})
+    u = user.get_by_session_token(token)
+    u.default_project.edit_run(run_uuid, json)
 
-    return {'errors': errors}
+    return {'is_successful': True}
 
 
 async def edit_session(request: Request, session_uuid: str) -> EndPointRes:
@@ -353,23 +305,42 @@ async def edit_session(request: Request, session_uuid: str) -> EndPointRes:
     return {'errors': errors}
 
 
-@utils.analytics.AnalyticsEvent.time_this(None)
 async def get_run_status(request: Request, run_uuid: str) -> JSONResponse:
     status_data = {}
     status_code = 404
 
-    s = run.get_status(run_uuid)
-    if s:
-        status_data = s.get_data()
-        status_code = 200
+    if len(run_uuid.split('_')) == 1:  # distributed
+        r = run.get(run_uuid)
+        if r is not None:
+            uuids = [f'{run_uuid}_{i}' for i in range(1, r.world_size)]
+            uuids.append(run_uuid)
+            status_data = run.get_merged_status_data(uuids)
 
-    response = JSONResponse(status_data)
-    response.status_code = status_code
+        if status_data is None or len(status_data.keys()) == 0:
+            status_data = {}
+            status_code = 404
+        else:
+            status_code = 200
 
-    return response
+        response = JSONResponse(status_data)
+        response.status_code = status_code
+
+        return response
+    else:
+        # TODO temporary change to used run_uuid as rank 0
+        run_uuid = utils.get_true_run_uuid(run_uuid)
+
+        s = run.get_status(run_uuid)
+        if s:
+            status_data = s.get_data()
+            status_code = 200
+
+        response = JSONResponse(status_data)
+        response.status_code = status_code
+
+        return response
 
 
-@utils.analytics.AnalyticsEvent.time_this(None)
 async def get_session_status(request: Request, session_uuid: str) -> JSONResponse:
     status_data = {}
     status_code = 404
@@ -386,23 +357,25 @@ async def get_session_status(request: Request, session_uuid: str) -> JSONRespons
 
 
 @auth.login_required
-@utils.analytics.AnalyticsEvent.time_this(None)
 @auth.check_labml_token_permission
-async def get_runs(request: Request, labml_token: str) -> EndPointRes:
-    u = auth.get_auth_user(request)
+async def get_runs(request: Request, labml_token: str, token: Optional[str] = None,
+                   tag: Optional[str] = None) -> EndPointRes:
+    u = user.get_by_session_token(token)
 
-    if labml_token:
-        runs_list = run.get_runs(labml_token)
-    else:
-        default_project = u.default_project
-        labml_token = default_project.labml_token
+    default_project = u.default_project
+    labml_token = default_project.labml_token
+
+    if tag is None:
         runs_list = default_project.get_runs()
+    else:
+        runs_list = default_project.get_runs_by_tags(tag)
 
+    statuses = status.mget([r.status for r in runs_list])
+    statuses = {s.key: s for s in statuses}
     res = []
     for r in runs_list:
-        s = run.get_status(r.run_uuid)
-        if r.run_uuid:
-            res.append({**r.get_summary(), **s.get_data()})
+        s = statuses[r.status]
+        res.append({**r.get_summary(), **s.get_data()})
 
     res = sorted(res, key=lambda i: i['start_time'], reverse=True)
 
@@ -410,10 +383,9 @@ async def get_runs(request: Request, labml_token: str) -> EndPointRes:
 
 
 @auth.login_required
-@utils.analytics.AnalyticsEvent.time_this(None)
 @auth.check_labml_token_permission
-async def get_sessions(request: Request, labml_token: str) -> EndPointRes:
-    u = auth.get_auth_user(request)
+async def get_sessions(request: Request, labml_token: str, token: Optional[str] = None) -> EndPointRes:
+    u = user.get_by_session_token(token)
 
     if labml_token:
         sessions_list = session.get_sessions(labml_token)
@@ -433,33 +405,31 @@ async def get_sessions(request: Request, labml_token: str) -> EndPointRes:
     return {'sessions': res, 'labml_token': labml_token}
 
 
-@utils.analytics.AnalyticsEvent.time_this(None)
 @auth.login_required
-async def delete_runs(request: Request) -> EndPointRes:
+async def delete_runs(request: Request, token: Optional[str] = None) -> EndPointRes:
     json = await request.json()
     run_uuids = json['run_uuids']
 
-    u = auth.get_auth_user(request)
+    u = user.get_by_session_token(token)
     u.default_project.delete_runs(run_uuids, u.email)
 
     return {'is_successful': True}
 
 
-@utils.analytics.AnalyticsEvent.time_this(None)
 @auth.login_required
-async def delete_sessions(request: Request) -> EndPointRes:
+async def delete_sessions(request: Request, token: Optional[str] = None) -> EndPointRes:
     json = await request.json()
     session_uuids = json['session_uuids']
 
-    u = auth.get_auth_user(request)
+    u = user.get_by_session_token(token)
     u.default_project.delete_sessions(session_uuids, u.email)
 
     return {'is_successful': True}
 
 
 @auth.login_required
-async def add_run(request: Request, run_uuid: str) -> EndPointRes:
-    u = auth.get_auth_user(request)
+async def add_run(request: Request, run_uuid: str, token: Optional[str] = None) -> EndPointRes:
+    u = user.get_by_session_token(token)
 
     u.default_project.add_run(run_uuid)
 
@@ -467,8 +437,8 @@ async def add_run(request: Request, run_uuid: str) -> EndPointRes:
 
 
 @auth.login_required
-async def add_session(request: Request, session_uuid: str) -> EndPointRes:
-    u = auth.get_auth_user(request)
+async def add_session(request: Request, session_uuid: str, token: Optional[str] = None) -> EndPointRes:
+    u = user.get_by_session_token(token)
 
     u.default_project.add_session(session_uuid)
 
@@ -476,7 +446,6 @@ async def add_session(request: Request, session_uuid: str) -> EndPointRes:
 
 
 @auth.login_required
-@utils.analytics.AnalyticsEvent.time_this(None)
 async def get_computer(request: Request, computer_uuid: str) -> EndPointRes:
     c = computer.get_or_create(computer_uuid)
 
@@ -484,141 +453,45 @@ async def get_computer(request: Request, computer_uuid: str) -> EndPointRes:
 
 
 @auth.login_required
-@utils.analytics.AnalyticsEvent.time_this(None)
-async def set_user(request: Request) -> EndPointRes:
+async def set_user(request: Request, token: Optional[str] = None) -> EndPointRes:
+    u = auth.get_auth_user(request)
     json = await request.json()
     data = json['user']
-    u = auth.get_auth_user(request)
     if u:
         u.set_user(data)
 
     return {'is_successful': True}
 
 
-@auth.login_required
-@utils.analytics.AnalyticsEvent.time_this(None)
-async def get_user(request: Request) -> EndPointRes:
-    u = auth.get_auth_user(request)
-
-    return u.get_data()
-
-
-@utils.analytics.AnalyticsEvent.time_this(None)
-async def is_user_logged(request: Request) -> EndPointRes:
-    return {'is_user_logged': auth.get_is_user_logged(request)}
-
-
-@utils.analytics.AnalyticsEvent.time_this(None)
-async def sync_computer(request: Request) -> EndPointRes:
-    """End point to sync UI-server and UI-computer. runs: to sync with the server.
-        """
-    errors = []
-
-    computer_uuid = request.query_params.get('computer_uuid', '')
-    if len(computer_uuid) < 10:
-        error = {'error': 'invalid_computer_uuid',
-                 'message': f'Invalid Computer UUID'}
-        errors.append(error)
-        return {'errors': errors}
-
-    c = computer.get_or_create(computer_uuid)
-
+async def get_user(request: Request):
+    token, u = auth.get_app_token(request)
     json = await request.json()
-    runs = json.get('runs', [])
-    res = c.sync_runs(runs)
+    if json is None:
+        return JSONResponse({'is_successful': False, 'error': 'Malformed request'}, status_code=400)
+    if u is None:
+        return JSONResponse({'is_successful': False, 'error': 'You need to be authenticated to perform this request'},
+                            status_code=200)
 
-    return {'runs': res}
+    session_token = u.generate_session_token(token)
+    return JSONResponse({'is_successful': True, 'user': u.get_data(), 'token': session_token}, status_code=200,
+                        headers={'Authorization': session_token})
 
 
-@utils.analytics.AnalyticsEvent.time_this(60.4)
-async def polling(request: Request) -> EndPointRes:
-    """End point to sync UI-server and UI-computer. jobs: statuses of jobs.
-    pending jobs will be returned in the response if there any
-           """
-    errors = []
+async def init_app_api(request: Request):
+    client_version = request.query_params.get('version', '')
+    api_version = settings.APP_API_VERSION
 
-    computer_uuid = request.query_params.get('computer_uuid', '')
-    if len(computer_uuid) < 10:
-        error = {'error': 'invalid_computer_uuid',
-                 'message': f'Invalid Computer UUID'}
-        errors.append(error)
-        return {'errors': errors}
-
-    c = computer.get_or_create(computer_uuid)
-
-    c.update_last_online()
-
-    json = await request.json()
-    job_responses = json.get('jobs', [])
-    if job_responses:
-        c.sync_jobs(job_responses)
-
-    pending_jobs = []
-    for i in range(16):
-        c = computer.get_or_create(computer_uuid)
-        pending_jobs = c.get_pending_jobs()
-        if pending_jobs:
-            break
-
-        await asyncio.sleep(3)
-
-    return {'jobs': pending_jobs}
+    if utils.check_version(str(client_version), str(api_version)):
+        return JSONResponse({'is_successful': False, 'error': 'API client is outdated, please upgrade'})
+    else:
+        return JSONResponse({'is_successful': True, 'version': api_version})
 
 
 @auth.login_required
-@utils.analytics.AnalyticsEvent.time_this(30.4)
-async def start_tensor_board(request: Request, computer_uuid: str) -> EndPointRes:
-    """End point to start TB for set of runs. runs: all the runs should be from a same computer.
-            """
-    c = computer.get_or_create(computer_uuid)
-
-    if not c.is_online:
-        return {'status': job.JobStatuses.COMPUTER_OFFLINE, 'data': {}}
-
-    json = await request.json()
-    runs = json.get('runs', [])
-    j = c.create_job(job.JobMethods.START_TENSORBOARD, {'runs': runs})
-
-    for i in range(15):
-        c = computer.get_or_create(computer_uuid)
-        completed_job = c.get_completed_job(j.job_uuid)
-        if completed_job and completed_job.is_completed:
-            return completed_job.to_data()
-
-        await asyncio.sleep(2)
-
-    data = j.to_data()
-    data['status'] = job.JobStatuses.TIMEOUT
-
-    return data
-
-
-@auth.login_required
-@utils.analytics.AnalyticsEvent.time_this(30.4)
-async def clear_checkpoints(request: Request, computer_uuid: str) -> EndPointRes:
-    """End point to clear checkpoints for set of runs. runs: all the runs should be from a same computer.
-            """
-    c = computer.get_or_create(computer_uuid)
-
-    if not c.is_online:
-        return {'status': job.JobStatuses.COMPUTER_OFFLINE, 'data': {}}
-
-    json = await request.json()
-    runs = json.get('runs', [])
-    j = c.create_job(job.JobMethods.CLEAR_CHECKPOINTS, {'runs': runs})
-
-    for i in range(15):
-        c = computer.get_or_create(computer_uuid)
-        completed_job = c.get_completed_job(j.job_uuid)
-        if completed_job and completed_job.is_completed:
-            return completed_job.to_data()
-
-        await asyncio.sleep(2)
-
-    data = j.to_data()
-    data['status'] = job.JobStatuses.TIMEOUT
-
-    return data
+async def get_tags(request: Request, token: Optional[str] = None):
+    u = user.get_by_session_token(token)
+    tags = u.default_project.get_all_tags()
+    return {'tags': tags}
 
 
 def _add_server(app: FastAPI, method: str, func: Callable, url: str):
@@ -636,11 +509,12 @@ def _add_ui(app: FastAPI, method: str, func: Callable, url: str):
 
 
 def add_handlers(app: FastAPI):
-    _add_server(app, 'POST', update_run, 'track')
-    _add_server(app, 'POST', update_session, 'computer')
-    _add_server(app, 'POST', sync_computer, 'sync')
-    _add_server(app, 'POST', polling, 'polling')
+    _add_server(app, 'POST', update_run, '{labml_token}/track')
+    _add_server(app, 'POST', update_session, '{labml_token}/computer')
 
+    _add_ui(app, 'GET', init_app_api, 'init')
+
+    _add_ui(app, 'GET', get_runs, 'runs/{labml_token}/{tag}')
     _add_ui(app, 'GET', get_runs, 'runs/{labml_token}')
     _add_ui(app, 'PUT', delete_runs, 'runs')
     _add_ui(app, 'GET', get_sessions, 'sessions/{labml_token}')
@@ -648,14 +522,13 @@ def add_handlers(app: FastAPI):
 
     _add_ui(app, 'GET', get_computer, 'computer/{computer_uuid}')
 
-    _add_ui(app, 'GET', get_user, 'user')
-    _add_ui(app, 'POST', set_user, 'user')
-
     _add_ui(app, 'GET', get_run, 'run/{run_uuid}')
     _add_ui(app, 'POST', edit_run, 'run/{run_uuid}')
     _add_ui(app, 'PUT', add_run, 'run/{run_uuid}/add')
     _add_ui(app, 'PUT', claim_run, 'run/{run_uuid}/claim')
     _add_ui(app, 'GET', get_run_status, 'run/status/{run_uuid}')
+
+    _add_ui(app, 'GET', get_tags, 'tags')
 
     _add_ui(app, 'GET', get_session, 'session/{session_uuid}')
     _add_ui(app, 'POST', edit_session, 'session/{session_uuid}')
@@ -663,15 +536,11 @@ def add_handlers(app: FastAPI):
     _add_ui(app, 'PUT', claim_session, 'session/{session_uuid}/claim')
     _add_ui(app, 'GET', get_session_status, 'session/status/{session_uuid}')
 
-    _add_ui(app, 'POST', sign_in, 'auth/sign_in')
-    _add_ui(app, 'DELETE', sign_out, 'auth/sign_out')
-    _add_ui(app, 'GET', is_user_logged, 'auth/is_logged')
-
-    _add_ui(app, 'POST', start_tensor_board, 'start_tensorboard/{computer_uuid}')
-    _add_ui(app, 'POST', clear_checkpoints, 'clear_checkpoints/{computer_uuid}')
+    _add_ui(app, 'POST', set_user, 'user')
+    _add_ui(app, 'POST', get_user, 'auth/user')
 
     for method, func, url, login_required in analyses.AnalysisManager.get_handlers():
         if login_required:
-            func = auth.login_required(func)
+            func = func
 
         _add_ui(app, method, func, url)

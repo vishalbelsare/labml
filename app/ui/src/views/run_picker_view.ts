@@ -1,14 +1,14 @@
 import {Weya as $, WeyaElement} from '../../../lib/weya/weya'
 import {DataLoader} from "../components/loader"
 import CACHE, {RunsListCache} from "../cache/cache"
-import {RunListItemModel} from '../models/run_list'
+import {RunListItem, RunListItemModel} from '../models/run_list'
 import {RunsListItemView} from '../components/runs_list_item'
 import {SearchView} from '../components/search'
 import {CancelButton} from '../components/buttons'
-import mix_panel from "../mix_panel"
 import {handleNetworkErrorInplace} from '../utils/redirect'
 import {setTitle} from '../utils/document'
 import {ScreenView} from '../screen_view'
+import {extractTags, getSearchQuery, runsFilter} from "../utils/search";
 
 interface RunsPickerViewOptions {
     onPicked: (run: RunListItemModel) => void
@@ -19,7 +19,7 @@ interface RunsPickerViewOptions {
 
 export class RunsPickerView extends ScreenView {
     runListCache: RunsListCache
-    currentRunsList: RunListItemModel[]
+    currentRunsList: RunListItem[]
     elem: HTMLDivElement
     runsListContainer: HTMLDivElement
     searchQuery: string
@@ -28,6 +28,8 @@ export class RunsPickerView extends ScreenView {
     private readonly onPicked: (run: RunListItemModel) => void
     private readonly onCancel: () => void
     private readonly title: string
+    private actualWidth: number
+    private defaultTag: string
 
     constructor(opt: RunsPickerViewOptions) {
         super()
@@ -38,15 +40,28 @@ export class RunsPickerView extends ScreenView {
         this.runListCache = CACHE.getRunsList()
 
         this.cancelButton = new CancelButton({onButtonClick: this.onCancel, parent: this.constructor.name})
+        this.searchQuery = getSearchQuery()
+        let r = extractTags(this.searchQuery)
+        this.defaultTag = r.mainTags.length > 0 ? r.mainTags[0] : ''
 
         this.loader = new DataLoader(async (force) => {
-            this.currentRunsList = (await this.runListCache.get(force)).runs
+            let runsList = (await this.runListCache.get(force, this.defaultTag)).runs
                 .filter(run => !opt.excludedRuns.has(run.run_uuid))
+            this.currentRunsList = []
+            for (let run of runsList) {
+                this.currentRunsList.push(new RunListItem(run))
+            }
         })
+    }
 
-        this.searchQuery = ''
+    onResize(width: number) {
+        super.onResize(width)
 
-        mix_panel.track('Runs Picker View')
+        this.actualWidth = Math.min(800, width)
+
+        if (this.elem) {
+            this._render().then()
+        }
     }
 
     async _render() {
@@ -66,7 +81,7 @@ export class RunsPickerView extends ScreenView {
                 })
 
                 $('div', '.runs-list', $ => {
-                    new SearchView({onSearch: this.onSearch}).render($)
+                    new SearchView({onSearch: this.onSearch, initText: this.searchQuery}).render($)
                     this.loader.render($)
                     this.runsListContainer = $('div', '.list.runs-list.list-group', '')
                 })
@@ -90,31 +105,29 @@ export class RunsPickerView extends ScreenView {
         return this.elem
     }
 
-    runsFilter = (run: RunListItemModel, query: RegExp) => {
-        let name = run.name.toLowerCase()
-        let comment = run.comment.toLowerCase()
-
-        return (name.search(query) !== -1 || comment.search(query) !== -1)
-    }
-
     onItemClicked = (elem: RunsListItemView) => {
         this.onPicked(elem.item)
     }
 
     onSearch = async (query: string) => {
         this.searchQuery = query
+        let r = extractTags(this.searchQuery)
+        this.defaultTag = r.mainTags.length > 0 ? r.mainTags[0] : ''
+
         await this.loader.load()
         this.renderList().then()
     }
 
     private async renderList() {
-        let re = new RegExp(this.searchQuery.toLowerCase(), 'g')
-        this.currentRunsList = this.currentRunsList.filter(run => this.runsFilter(run, re))
+        this.currentRunsList = this.currentRunsList.filter(run => runsFilter(run, this.searchQuery))
 
         this.runsListContainer.innerHTML = ''
         $(this.runsListContainer, $ => {
             for (let i = 0; i < this.currentRunsList.length; i++) {
-                new RunsListItemView({item: this.currentRunsList[i], onClick: this.onItemClicked}).render($)
+                new RunsListItemView({
+                    item: this.currentRunsList[i],
+                    onClick: this.onItemClicked,
+                    width: this.actualWidth}).render($)
             }
         })
 

@@ -169,6 +169,8 @@ def _get_value_full(value: any):
         numpy = None
 
     if numpy is not None and isinstance(value, numpy.ndarray):
+        if len(value.shape) == 0:
+            return _get_value_full(value.tolist())
         arr, trunc = _render_tensor(value, new_line='\n')
         arr, trunc_format = _format_tensor(arr)
         if not trunc and not trunc_format:
@@ -194,6 +196,8 @@ def _get_value_full(value: any):
         torch = None
 
     if torch is not None and isinstance(value, torch.Tensor):
+        if len(value.shape) == 0:
+            return _get_value_full(value.item())
         arr, trunc = _render_tensor(value, new_line='\n')
         arr, trunc_format = _format_tensor(arr)
         if not trunc and not trunc_format:
@@ -302,17 +306,25 @@ class _InspectLogger:
                 " item(s)"])
 
     def info(self, *args, **kwargs):
-        if '_expand' in kwargs:
-            is_expand = kwargs['_expand']
-            del kwargs['_expand']
-        else:
-            is_expand = False
-
         if '_n' in kwargs:
             n_key_values = kwargs['_n']
             del kwargs['_n']
         else:
             n_key_values = 10
+
+        if '_expand' in kwargs:
+            is_expand = kwargs['_expand']
+            del kwargs['_expand']
+        else:
+            is_expand = None
+
+        if len(args) == 0 and len(kwargs) == 1 and is_expand != True:
+            self.parts.append([(next(iter(kwargs.keys())), [Text.heading, Text.key])])
+            args = [next(iter(kwargs.values()))]
+            kwargs = {}
+
+        if is_expand is None:
+            is_expand = False
 
         if len(args) == 0:
             self._log_key_value([(k, v) for k, v in kwargs.items()],
@@ -342,12 +354,12 @@ class _InspectLogger:
 
                 return
 
-            from labml.internal.analytics.models import ValueCollection
-            if isinstance(arg, ValueCollection):
-                self._log_key_value([(i, v) for i, v in enumerate(arg.keys())],
-                                    n_key_values=n_key_values,
-                                    is_expand=is_expand)
-                return
+            # from labml.internal.analytics.models import ValueCollection
+            # if isinstance(arg, ValueCollection):
+            #     self._log_key_value([(i, v) for i, v in enumerate(arg.keys())],
+            #                         n_key_values=n_key_values,
+            #                         is_expand=is_expand)
+            #     return
 
             self.parts.append(_get_value_full(arg))
         else:

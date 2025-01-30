@@ -5,12 +5,12 @@ import CACHE, {UserCache} from "../cache/cache"
 import {HamburgerMenuView} from '../components/hamburger_menu'
 import {User} from '../models/user'
 import EditableField from '../components/input/editable_field'
-import mix_panel from "../mix_panel"
 import {handleNetworkError} from '../utils/redirect'
 import {setTitle} from '../utils/document'
 import {ScreenView} from '../screen_view'
+import {UserMessages} from "../components/user_messages"
 
-const DEFAULT_IMAGE = 'https://raw.githubusercontent.com/azouaoui-med/pro-sidebar-template/gh-pages/src/img/user.jpg'
+const DEFAULT_IMAGE = '/images/user.png'
 const LIGHT = 'light'
 const DARK = 'dark'
 
@@ -29,8 +29,6 @@ class SettingsView extends ScreenView {
 
         this.userCache = CACHE.getUser()
         this.loader = new Loader(true)
-
-        mix_panel.track('Settings View')
     }
 
     onResize(width: number) {
@@ -61,25 +59,8 @@ class SettingsView extends ScreenView {
         this.loader.remove()
 
         $(this.settingsContainer, $ => {
-            $('div', '.text-center', $ => {
-                $('img', '.mt-2.image-style.rounded-circle', {
-                    src: this.user.picture || DEFAULT_IMAGE
-                })
-            })
             $('div.input-list-container', $ => {
                 $('ul', $ => {
-                    new EditableField({
-                        name: 'Token',
-                        value: this.user.default_project
-                    }).render($)
-                    new EditableField({
-                        name: 'Name',
-                        value: this.user.name
-                    }).render($)
-                    new EditableField({
-                        name: 'Email',
-                        value: this.user.email
-                    }).render($)
                     $(`li`, $ => {
                         $('span.item-key', 'Theme')
                         $('span.item-value', {on: {change: this.onThemeUpdate}}, $ => {
@@ -104,10 +85,15 @@ class SettingsView extends ScreenView {
     }
 
     onThemeUpdate = async () => {
-        this.user.theme = this.radioDark.checked ? DARK : LIGHT
-        this.userCache.setUser(this.user).then()
-        this.updateRadio()
-        await SCREEN.updateTheme()
+        try {
+            this.user.theme = this.radioDark.checked ? DARK : LIGHT
+            await this.userCache.setUser(this.user)
+            this.updateRadio()
+            await SCREEN.updateTheme()
+        } catch (e) {
+            UserMessages.shared.networkError(e, "Failed to save")
+            this.updateRadio()
+        }
     }
 
     updateRadio = () => {

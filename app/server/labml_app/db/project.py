@@ -1,10 +1,9 @@
-from typing import List, Dict, Union, Optional
+from typing import List, Dict, Union, Optional, Set
 
 from labml_db import Model, Key, Index
 
 from . import run
 from . import session
-from . import blocked_uuids
 from ..logger import logger
 
 
@@ -15,6 +14,8 @@ class Project(Model['Project']):
     runs: Dict[str, Key['run.Run']]
     sessions: Dict[str, Key['session.Session']]
     is_run_added: bool
+    folders: any  # delete from db and then remove
+    tag_index: Dict[str, Set[str]]
 
     @classmethod
     def defaults(cls):
@@ -24,6 +25,8 @@ class Project(Model['Project']):
                     runs={},
                     sessions={},
                     is_run_added=False,
+                    tag_index={},
+                    folders={},
                     )
 
     def is_project_run(self, run_uuid: str) -> bool:
@@ -32,21 +35,23 @@ class Project(Model['Project']):
     def is_project_session(self, session_uuid: str) -> bool:
         return session_uuid in self.sessions
 
-    def get_runs(self) -> List['run.Run']:
+    def _get_runs_util(self, run_uuids: List[str]) -> List['run.Run']:
         res = []
-        likely_deleted = []
-        for run_uuid, run_key in self.runs.items():
-            try:
-                r = run.get(run_uuid)
-                if r:
-                    res.append(r)
-                else:
-                    likely_deleted.append(run_uuid)
-            except TypeError as e:
-                logger.error('error in creating run list, ' + run_uuid + ':' + str(e))
 
+        runs = run.mget(run_uuids)
+        run_uuids_from_db = []
+        for r in runs:
+            if r:
+                res.append(r)
+                run_uuids_from_db.append(r.run_uuid)
+
+        likely_deleted = set(run_uuids) - set(run_uuids_from_db)
         for run_uuid in likely_deleted:
-            self.runs.pop(run_uuid)
+            if run_uuid in self.runs:
+                self.runs.pop(run_uuid)
+            for tag, runs in self.tag_index.items():
+                if run_uuid in runs:
+                    self.tag_index[tag].remove(run_uuid)
 
         if self.is_run_added:
             self.is_run_added = False
@@ -56,22 +61,48 @@ class Project(Model['Project']):
 
         return res
 
+    def get_all_tags(self) -> List[str]:
+        tags_to_pop = []
+        for tag, runs in self.tag_index.items():
+            if not runs:
+                tags_to_pop.append(tag)
+
+        for tag in tags_to_pop:
+            self.tag_index.pop(tag)
+
+        return list(self.tag_index.keys())
+
+    def get_runs(self) -> List['run.Run']:
+        run_uuids = list(self.runs.keys())
+        return self._get_runs_util(run_uuids)
+
+    def get_runs_by_tags(self, tag: str) -> List['run.Run']:
+        if tag in self.tag_index:
+            run_uuids = [r for r in self.tag_index[tag]]
+            return self._get_runs_util(run_uuids)
+        else:
+            return []
+
     def get_sessions(self) -> List['session.Session']:
         res = []
         for session_uuid, session_key in self.sessions.items():
-            res.append(session_key.load())
+            session_data = session_key.load()
+            if session_data is not None:
+                res.append(session_data)
 
         return res
 
     def delete_runs(self, run_uuids: List[str], project_owner: str) -> None:
         for run_uuid in run_uuids:
             if run_uuid in self.runs:
-                self.runs.pop(run_uuid)
                 r = run.get(run_uuid)
                 if r and r.owner == project_owner:
                     try:
-                        if r.is_in_progress:
-                            blocked_uuids.add_blocked_run(r)
+                        for tag in r.tags:
+                            if tag in self.tag_index:
+                                self.tag_index[tag].remove(run_uuid)
+                                if len(self.tag_index[tag]) == 0:
+                                    self.tag_index.pop(tag)
                         run.delete(run_uuid)
                     except TypeError:
                         logger.error(f'error while deleting the run {run_uuid}')
@@ -85,8 +116,6 @@ class Project(Model['Project']):
                 s = session.get(session_uuid)
                 if s and s.owner == project_owner:
                     try:
-                        if s.is_in_progress:
-                            blocked_uuids.add_blocked_session(s)
                         session.delete(session_uuid)
                     except TypeError:
                         logger.error(f'error while deleting the session {session_uuid}')
@@ -99,7 +128,51 @@ class Project(Model['Project']):
         if r:
             self.runs[run_uuid] = r.key
 
+            for tag in r.tags:
+                if tag not in self.tag_index:
+                    self.tag_index[tag] = set()
+                self.tag_index[tag].add(run_uuid)
+
         self.save()
+
+    def add_run_with_model(self, r: run.Run) -> None:
+        self.runs[r.run_uuid] = r.key
+        self.is_run_added = True
+
+        for tag in r.tags:
+            if tag not in self.tag_index:
+                self.tag_index[tag] = set()
+            self.tag_index[tag].add(r.run_uuid)
+
+        self.save()
+
+    def edit_run(self, run_uuid: str, data: any):
+        r = run.get(run_uuid)
+        if r is None:
+            raise ValueError(f'Run {run_uuid} not found')
+
+        current_tags = r.tags
+        new_tags = data.get('tags', r.tags)
+
+        for tag in current_tags:
+            if (tag not in new_tags  # removed tag
+                    and tag in self.tag_index
+                    and run_uuid in self.tag_index[tag]):
+                self.tag_index[tag].remove(run_uuid)
+
+        for tag in new_tags:
+            if tag not in self.tag_index:
+                self.tag_index[tag] = set()
+            self.tag_index[tag].add(run_uuid)  # set will handle duplicates
+
+        r.edit_run(data)
+        self.save()
+
+    def get_run(self, run_uuid: str) -> Optional['run.Run']:
+        if run_uuid in self.runs:
+            return self.runs[run_uuid].load()
+        else:
+            return None
 
     def add_session(self, session_uuid: str) -> None:
         s = session.get(session_uuid)
@@ -126,8 +199,8 @@ def get_project(labml_token: str) -> Union[None, Project]:
 def get_run(run_uuid: str, labml_token: str = '') -> Optional['run.Run']:
     p = get_project(labml_token)
 
-    if run_uuid in p.runs:
-        return p.runs[run_uuid].load()
+    if p.is_project_run(run_uuid):
+        return p.get_run(run_uuid)
     else:
         return None
 

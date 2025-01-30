@@ -1,31 +1,28 @@
 from pathlib import Path
-from typing import Optional, Set, Union
+from typing import Optional, Set
 
-from labml import logger, monit
-from labml.internal import util
-from labml.internal.api.configs import WebAPIConfigs
-from labml.internal.computer import CONFIGS_FOLDER
+from labml import logger
 from labml.logger import Text
+from .. import util
+from ..app.configs import AppTrackConfigs
+from ..lab import get_app_url_for_handle
+
+CONFIGS_FOLDER = '.labml'
 
 
 class Computer:
-    """
-    ### Computer
-
-    Lab contains the labml specific properties.
-    """
-    web_api_sync: str
-    web_api_polling: str
-    web_api: WebAPIConfigs
+    app_sync_url: str
+    app_polling_url: str
+    app_configs: AppTrackConfigs
     uuid: str
     config_folder: Path
+    name: str
 
     def __init__(self):
         self.home = Path.home()
         self.config_folder = self.home / CONFIGS_FOLDER
         self.projects_folder = self.config_folder / 'projects'
         self.runs_cache = self.config_folder / 'runs_cache'
-        self.tensorboard_symlink_dir = self.config_folder / 'tensorboard'
         self.configs_file = self.config_folder / 'configs.yaml'
         self.app_folder = self.config_folder / 'app'
 
@@ -54,7 +51,7 @@ class Computer:
                     config = {}
         else:
             logger.log([
-                ('~/labml/configs.yaml', Text.value),
+                (f'~/{CONFIGS_FOLDER}/configs.yaml', Text.value),
                 ' does not exist. Creating ',
                 (str(self.configs_file), Text.meta)])
             config = {}
@@ -71,32 +68,20 @@ class Computer:
                 config[k] = v
 
         self.uuid = config['uuid']
-        web_api_url = config['web_api']
-        if web_api_url[0:4] != 'http':
-            web_api_url = f"https://api.labml.ai/api/v1/computer?labml_token={web_api_url}&"
-        self.web_api = WebAPIConfigs(url=web_api_url,
-                                     frequency=config['web_api_frequency'],
-                                     verify_connection=config['web_api_verify_connection'],
-                                     open_browser=config['web_api_open_browser'],
-                                     is_default=web_api_url == self.__default_config()['web_api'])
-        self.web_api_sync = config['web_api_sync']
-        self.web_api_polling = config['web_api_polling']
+        self.name = config['name']
 
-        self.tensorboard_port = config['tensorboard_port']
-        self.tensorboard_visible_port = config['tensorboard_visible_port']
-        self.tensorboard_host = config['tensorboard_host']
-        self.tensorboard_protocol = config['tensorboard_protocol']
+        app_url = get_app_url_for_handle('', base_url=config['app_url'])
 
-    def set_token(self, token: str):
-        with monit.section('Update ~/labml/configs.yaml'):
-            with open(str(self.configs_file)) as f:
-                config = util.yaml_load(f.read())
-                assert config is not None
+        # if not app_url:
+        #     raise ValueError('Please provide `app_url` in `~/labml/configs.yaml` or set '
+        #                      'environment variable `labml_app_url`.')
 
-            config['web_api'] = token
-
-            with open(str(self.configs_file), 'w') as f:
-                f.write(util.yaml_dump(config))
+        self.app_configs = AppTrackConfigs(url=get_app_url_for_handle('computer', base_url=app_url),
+                                           frequency=config['app_track_frequency'],
+                                           open_browser=config['app_open_browser'],
+                                           is_default=False)
+        self.app_sync_url = get_app_url_for_handle('sync', base_url=app_url)
+        self.app_polling_url = get_app_url_for_handle('polling', base_url=app_url)
 
     def __str__(self):
         return f"<Computer uuid={self.uuid}>"
@@ -107,16 +92,10 @@ class Computer:
     @staticmethod
     def __default_config():
         return dict(
-            web_api='https://api.labml.ai/api/v1/computer?',
-            web_api_frequency=0,
-            web_api_verify_connection=True,
-            web_api_open_browser=True,
-            web_api_sync='https://api.labml.ai/api/v1/sync?',
-            web_api_polling='https://api.labml.ai/api/v1/polling?',
-            tensorboard_port=6006,
-            tensorboard_visible_port=6006,
-            tensorboard_host='localhost',
-            tensorboard_protocol='http',
+            app_url=None,
+            app_track_frequency=0,
+            app_open_browser=True,
+            name='computer_name'
         )
 
     def get_projects(self) -> Set[str]:

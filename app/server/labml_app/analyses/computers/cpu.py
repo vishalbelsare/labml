@@ -47,24 +47,29 @@ class CPUAnalysis(Analysis):
             if ind_type == COMPUTEREnums.CPU:
                 res[ind] = s
 
-        self.cpu.track(res)
+        self.cpu.track(res, keep_last_24h=True)
 
     def get_tracking(self):
         res = []
         summary = []
+        series_list = []
         for ind, track in self.cpu.tracking.items():
             name = ind.split('.')
 
             if any(x in ['freq', 'system', 'idle', 'user'] for x in name):
                 continue
 
-            series: Dict[str, Any] = Series().load(track).detail
-            series['name'] = ''.join(name[-1])
+            series = Series().load(track)
+            series_list.append(series.to_data())
+            series_data: Dict[str, Any] = series.detail
+            series_data['name'] = ''.join(name[-1])
 
-            res.append(series)
+            res.append(series_data)
 
-        if res:
-            summary = [get_mean_series(res)]
+        if series_list:
+            mean_series = Series().load(get_mean_series(series_list)).detail
+            mean_series['name'] = 'mean'
+            summary = [mean_series]
 
         if len(res) > 1:
             res.sort(key=lambda s: int(s['name']))
@@ -134,7 +139,7 @@ async def get_cpu_preferences(request: Request, session_uuid: str) -> Any:
     return cp.get_data()
 
 
-@Analysis.route('POST', 'cpu/preferences/<session_uuid>')
+@Analysis.route('POST', 'cpu/preferences/{session_uuid}')
 async def set_cpu_preferences(request: Request, session_uuid: str) -> Any:
     preferences_key = CPUPreferencesIndex.get(session_uuid)
 

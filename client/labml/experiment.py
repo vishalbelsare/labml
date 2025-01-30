@@ -1,23 +1,14 @@
-from pathlib import Path
-from typing import Optional, Set, Dict, List, TYPE_CHECKING, overload, Tuple
-
-import numpy as np
+from typing import Optional, Set, Dict, overload
 
 from labml.configs import BaseConfigs
 from labml.internal.experiment import \
     create_experiment as _create_experiment, \
     experiment_singleton as _experiment_singleton, \
-    ModelSaver
-from labml.internal.experiment.experiment_run import \
-    get_configs as _get_configs, \
-    save_bundle as _save_bundle, \
-    load_bundle as _load_bundle
+    has_experiment
+from labml.internal.experiment.experiment_run import get_configs as _get_configs
 from labml.internal.monitor import monitor_singleton as monitor
 
-if TYPE_CHECKING:
-    import torch
-
-AVAILABLE_WRITERS = {'screen', 'web_api', 'sqlite', 'tensorboard', 'wandb', 'comet', 'file'}
+AVAILABLE_WRITERS = {'screen', 'app', 'file'}
 
 
 def generate_uuid() -> str:
@@ -25,11 +16,12 @@ def generate_uuid() -> str:
     return uuid1().hex
 
 
-def save_checkpoint():
-    r"""
-    Saves model checkpoints
+def worker():
     """
-    _experiment_singleton().save_checkpoint()
+    A worker like a data loader
+    """
+    if has_experiment():
+        _experiment_singleton().worker()
 
 
 def get_uuid():
@@ -48,6 +40,9 @@ def create(*,
            writers: Set[str] = None,
            ignore_callers: Set[str] = None,
            tags: Optional[Set[str]] = None,
+           distributed_rank: int = 0,
+           distributed_world_size: int = 0,
+           distributed_main_rank: int = 0,
            disable_screen: bool = False):
     r"""
     Create an experiment
@@ -58,21 +53,16 @@ def create(*,
             created the experiment
         comment (str, optional): a short description of the experiment
         writers (Set[str], optional): list of writers to write stat to.
-            Defaults to ``{'tensorboard', 'sqlite', 'web_api'}``.
+            Defaults to ``{'screen', 'app'}``.
         ignore_callers: (Set[str], optional): list of files to ignore when
             automatically determining ``python_file``
-        tags (Set[str], optional): Set of tags for experiment
+        tags (Set[str], optional): set of tags for experiment
+        distributed_rank (int, optional): rank if this is a distributed training session
+        distributed_world_size (int, optional): world_size if this is a distributed training session
     """
 
     if writers is None:
-        writers = {'screen', 'sqlite', 'web_api'}
-        from labml.internal.util.tensorboard_writer import has_tensorboard
-        if has_tensorboard():
-            writers.add('tensorboard')
-
-    if 'labml' in writers:
-        writers.remove('labml')
-        writers.add('web_api')
+        writers = {'screen', 'app'}
 
     for w in writers:
         if w not in AVAILABLE_WRITERS:
@@ -83,6 +73,15 @@ def create(*,
 
     if ignore_callers is None:
         ignore_callers = set()
+
+    if uuid is None:
+        import os
+        if 'RUN_UUID' in os.environ:
+            uuid = os.environ['RUN_UUID']
+
+    if distributed_world_size > 0:
+        if uuid is None:
+            raise ValueError('You must provide a run UUID for distributed training sessions')
 
     if uuid is None:
         uuid = generate_uuid()
@@ -96,6 +95,9 @@ def create(*,
                        writers=writers,
                        ignore_callers=ignore_callers,
                        tags=tags,
+                       distributed_rank=distributed_rank,
+                       distributed_world_size=distributed_world_size,
+                       distributed_main_rank=distributed_main_rank,
                        is_evaluate=False)
 
 
@@ -114,77 +116,6 @@ def evaluate():
                        ignore_callers=set(),
                        tags=None,
                        is_evaluate=True)
-
-
-def distributed(rank: int, world_size: int):
-    """
-    Set the ``rank`` and ``world_size`` of the current process
-    in an distributed training setup.
-
-    Arguments:
-        rank (int): rank of the current process
-        world_size (int): number of training processes
-    """
-    _experiment_singleton().distributed(rank, world_size)
-
-
-def add_model_savers(savers: Dict[str, ModelSaver]):
-    """
-    Add custom model savers
-
-    Arguments:
-        savers (Dict[str, ModelSaver]): a dictionary of :class:`labml.experiment.ModelSaver`.
-            These will be saved with :func:`labml.experiment.save_checkpoint`
-            and loaded with :func:`labml.experiment.load`.
-    """
-    _experiment_singleton().checkpoint_saver.add_savers(savers)
-
-
-@overload
-def add_pytorch_models(**kwargs: 'torch.nn.Module'):
-    ...
-
-
-@overload
-def add_pytorch_models(models: Dict[str, 'torch.nn.Module']):
-    ...
-
-
-def add_pytorch_models(*args, **kwargs):
-    """
-    Set variables for saving and loading
-
-    Arguments:
-        models (Dict[str, torch.nn.Module]): a dictionary of torch modules
-            used in the experiment.
-            These will be saved with :func:`labml.experiment.save_checkpoint`
-            and loaded with :func:`labml.experiment.load`.
-    """
-
-    from labml.internal.experiment.pytorch import add_models as _add_pytorch_models
-
-    if len(args) > 0:
-        assert len(args) == 1
-        assert isinstance(args[0], dict)
-        _add_pytorch_models(args[0])
-    else:
-        _add_pytorch_models(kwargs)
-
-
-def add_sklearn_models(models: Dict[str, any]):
-    """
-    .. warning::
-        This is still experimental.
-
-    Set variables for saving and loading
-
-    Arguments:
-        models (Dict[str, any]): a dictionary of SKLearn models
-            These will be saved with :func:`labml.experiment.save_checkpoint`
-            and loaded with :func:`labml.experiment.load`.
-    """
-    from labml.internal.experiment.sklearn import add_models as _add_sklearn_models
-    _add_sklearn_models(models)
 
 
 @overload
@@ -262,20 +193,14 @@ def configs(*args):
         raise RuntimeError("Invalid call to calculate configs")
 
 
-_load_run_uuid: Optional[str] = None
-_load_checkpoint: Optional[int] = None
-
-
-def start():
+def start(global_step: int = 0):
     r"""
     Starts the experiment.
     Run it using ``with`` statement and it will monitor and report, experiment completion
     and exceptions.
     """
-    global _load_run_uuid
-    global _load_checkpoint
 
-    return _experiment_singleton().start(run_uuid=_load_run_uuid, checkpoint=_load_checkpoint)
+    return _experiment_singleton().start()
 
 
 def load_configs(run_uuid: str, *, is_only_hyperparam: bool = True):
@@ -309,86 +234,6 @@ def load_configs(run_uuid: str, *, is_only_hyperparam: bool = True):
     return values
 
 
-def load(run_uuid: str, checkpoint: Optional[int] = None):
-    r"""
-    Loads a the run from a previous checkpoint.
-    You need to separately call ``experiment.start`` to start the experiment.
-
-    Arguments:
-        run_uuid (str): experiment will start from
-            a saved state in the run with UUID ``run_uuid``
-        checkpoint (str, optional): if provided the experiment will start from
-            given checkpoint. Otherwise it will start from the last checkpoint.
-    """
-    global _load_run_uuid
-    global _load_checkpoint
-
-    _load_run_uuid = run_uuid
-    _load_checkpoint = checkpoint
-
-
-def save_bundle(path: Path, run_uuid: str, checkpoint: Optional[int] = None, *,
-                data_files: List[str] = None):
-    """
-    Create a ``.tar.gz`` file with the configs and checkpoints that can be distributed and loaded
-    easily.
-
-    Arguments:
-        path (Path): ``.tar.gz`` file path
-        run_uuid (str): experiment run to bundle
-        checkpoint (str, optional): if provided the given checkpoint will be bundled.
-            Otherwise it will bundle the last checkpoint.
-        data_files: List of data files (relative to :func:`labml.lab.get_data_path`) to be bundled.
-    """
-    if data_files is None:
-        data_files = []
-
-    if not checkpoint:
-        checkpoint = -1
-
-    _save_bundle(path, run_uuid, checkpoint,
-                 data_files=data_files)
-
-
-def load_bundle(path: Path, *, url: Optional[str] = None) -> Tuple[str, int]:
-    """
-    Extract a bundle into experiments folder and returns the ``run_uuid`` and checkpoint.
-
-    Arguments:
-        path (Path): ``.tar.gz`` file path
-        url (str): url to download the ``.tar.gz`` file from
-    """
-    return _load_bundle(path, url=url)
-
-
-def load_models(models: List[str], run_uuid: str, checkpoint: Optional[int] = None):
-    r"""
-    Loads and starts the run from a previous checkpoint.
-
-    Arguments:
-        models (List[str]): List of names of models to be loaded
-        run_uuid (str): experiment will start from
-            a saved state in the run with UUID ``run_uuid``
-        checkpoint (str, optional): if provided the experiment will start from
-            given checkpoint. Otherwise it will start from the last checkpoint.
-    """
-
-    _experiment_singleton().load_models(models=models, run_uuid=run_uuid, checkpoint=checkpoint)
-
-
-def save_numpy(name: str, array: np.ndarray):
-    r"""
-    Saves a single numpy array. This is used to save processed data.
-    """
-
-    numpy_path = Path(_experiment_singleton().run.numpy_path)
-
-    if not numpy_path.exists():
-        numpy_path.mkdir(parents=True)
-    file_name = name + ".npy"
-    np.save(str(numpy_path / file_name), array)
-
-
 def record(*,
            name: Optional[str] = None,
            comment: Optional[str] = None,
@@ -396,7 +241,9 @@ def record(*,
            tags: Optional[Set[str]] = None,
            exp_conf: Dict[str, any] = None,
            lab_conf: Dict[str, any] = None,
-           token: str = None,
+           app_url: str = None,
+           distributed_rank: int = 0,
+           distributed_world_size: int = 0,
            disable_screen: bool = False):
     r"""
     This combines :func:`create`, :func:`configs` and :func:`start`.
@@ -405,21 +252,23 @@ def record(*,
         name (str, optional): name of the experiment
         comment (str, optional): a short description of the experiment
         writers (Set[str], optional): list of writers to write stat to.
-            Defaults to ``{'tensorboard', 'sqlite', 'web_api'}``.
+            Defaults to ``{'screen', 'app'}``.
         tags (Set[str], optional): Set of tags for experiment
         exp_conf (Dict[str, any], optional): a dictionary of experiment configurations
         lab_conf (Dict[str, any], optional): a dictionary of configurations for LabML.
-         Use this if you want to change default configurations such as ``web_api``, and
+         Use this if you want to change default configurations such as ``app_track_url``, and
          ``data_path``.
-        token (str, optional): a shortcut to provide LabML mobile app token (or url - ``web_api``)
+        app_url (str, optional): a shortcut to provide LabML app url
          instead of including it in ``lab_conf``. You can set this with :func:`labml.lab.configure`,
          `or with a configuration file for the entire project <../guide/installation_setup.html>`_.
+        distributed_rank (int, optional): rank if this is a distributed training session
+        distributed_world_size (int, optional): world_size if this is a distributed training session
     """
 
-    if token is not None:
+    if app_url is not None:
         if lab_conf is None:
             lab_conf = {}
-        lab_conf['web_api'] = token
+        lab_conf['app_url'] = app_url
 
     if lab_conf is not None:
         from labml.internal.lab import lab_singleton as _internal
@@ -431,6 +280,8 @@ def record(*,
            writers=writers,
            ignore_callers=None,
            tags=tags,
+           distributed_rank=distributed_rank,
+           distributed_world_size=distributed_world_size,
            disable_screen=disable_screen)
 
     if exp_conf is not None:

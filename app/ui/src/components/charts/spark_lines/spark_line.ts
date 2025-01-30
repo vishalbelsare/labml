@@ -3,8 +3,8 @@ import {WeyaElementFunction} from '../../../../../lib/weya/weya'
 import {PointValue} from "../../../models/run"
 import {getBaseColor} from "../constants"
 import {getExtent, getScale, getSelectedIdx} from "../utils"
-import {LineFill, LinePlot} from "../lines/plot"
 import {formatFixed} from "../../../utils/value"
+import {LineFill, LinePlot} from '../lines/plot'
 
 export interface SparkLineOptions {
     name: string
@@ -12,18 +12,16 @@ export interface SparkLineOptions {
     width: number
     stepExtent: [number, number]
     selected: number
-    minLastValue: number
-    maxLastValue: number
     onClick?: () => void
     isMouseMoveOpt?: boolean
     color: string
+    isComparison?: boolean
+    isBase?: boolean
 }
 
 export class SparkLine {
     series: PointValue[]
     name: string
-    minLastValue: number
-    maxLastValue: number
     color: string
     selected: number
     titleWidth: number
@@ -37,9 +35,15 @@ export class SparkLine {
     yScale: d3.ScaleLinear<number, number>
     bisect: d3.Bisector<number, number>
     linePlot: LinePlot
+    isBase: boolean
+    isComparison: boolean
 
     constructor(opt: SparkLineOptions) {
         this.series = opt.series
+
+        if (opt.selected == -1 && this.series.length > 0) {
+            this.series = [this.series[this.series.length - 1]]
+        }
         this.name = opt.name
         this.selected = opt.selected
         this.onClick = opt.onClick
@@ -47,8 +51,9 @@ export class SparkLine {
         this.color = this.selected >= 0 ? opt.color : getBaseColor()
         this.chartWidth = Math.min(300, Math.round(opt.width * .60))
         this.titleWidth = (opt.width - this.chartWidth) / 2
-        this.minLastValue = opt.minLastValue
-        this.maxLastValue = opt.maxLastValue
+        this.isBase = opt.isBase ?? false
+        this.isComparison = opt.isComparison ?? false
+
 
         this.yScale = getScale(getExtent([this.series], d => d.value, true), -25)
         this.xScale = getScale(opt.stepExtent, this.chartWidth)
@@ -57,25 +62,30 @@ export class SparkLine {
             return d.step
         }).left
 
-        if (this.onClick != null && this.selected >= 0) {
-            this.className = 'selected'
-        }
-
-        if (this.onClick != null) {
-            this.className += '.list-group-item-action'
+        if (this.isSelected) {
+             this.className = 'selected'
         }
     }
 
+    private get isSelected() {
+        return this.onClick != null && this.selected >= 1
+    }
+
     changeCursorValue(cursorStep?: number | null) {
-        if (this.selected >= 0 || this.isMouseMoveOpt) {
-            this.linePlot.renderCursorCircle(cursorStep)
+        if (this.isSelected) {
+            this.linePlot?.renderIndicators(cursorStep)
             this.renderValue(cursorStep)
         }
     }
 
     renderValue(cursorStep?: number | null) {
-        const last = this.series[this.selected >= 0 || this.isMouseMoveOpt ?
-            getSelectedIdx(this.series, this.bisect, cursorStep) : this.series.length - 1]
+        if (this.series.length == 0) {
+            return
+        }
+
+        const index = this.isSelected ?
+            getSelectedIdx(this.series, this.bisect, cursorStep) : this.series.length - 1
+        const last = this.series[index]
 
         if (Math.abs(last.value - last.smoothed) > Math.abs(last.value) / 1e6) {
             this.secondaryElem.textContent = formatFixed(last.value, 6)
@@ -87,10 +97,16 @@ export class SparkLine {
 
     render($: WeyaElementFunction) {
         $(`div.sparkline-list-item.list-group-item.${this.className}`, {on: {click: this.onClick}}, $ => {
-            $('div.sparkline-content', {style: {width: `${Math.min(this.titleWidth * 2 + this.chartWidth, 450)}px`}}, $ => {
-                $('span', '.title', this.name, {style: {color: this.color}})
-                $('svg.sparkline', {style: {width: `${this.chartWidth + this.titleWidth * 2}px`}, height: 36}, $ => {
+            $(`div.sparkline-content`, {style: {width: `${Math.min(this.titleWidth * 2 + this.chartWidth, 450)}px`}}, $ => {
+                if (this.isComparison && this.isBase) {
+                    $('i', `.fa.fa-balance-scale.title.icon.chart`, '', {style: {color: this.color}})
+                }
+                let title = $('span', '.title', this.name, {style: {color: this.color}})
+                let sparkline = $('svg.sparkline', {style: {width: `${this.chartWidth + this.titleWidth * 2}px`}, height: 36}, $ => {
                     $('g', {transform: `translate(${this.titleWidth}, 30)`}, $ => {
+                        if (this.series.length == 0) {
+                            return
+                        }
                         new LineFill({
                             series: this.series,
                             xScale: this.xScale,
@@ -102,7 +118,8 @@ export class SparkLine {
                             series: this.series,
                             xScale: this.xScale,
                             yScale: this.yScale,
-                            color: '#7f8c8d'
+                            color: '#7f8c8d',
+                            isBase: this.isBase,
                         })
                         this.linePlot.render($)
                     })
@@ -117,8 +134,13 @@ export class SparkLine {
                         })
                     })
                 })
+                if (this.isMouseMoveOpt) {
+                    title.style.opacity = `${this.isSelected ? 1 : 0.4}`
+                    sparkline.style.opacity = `${this.isSelected ? 1 : 0.4}`
+                }
             })
         })
+
         this.renderValue()
     }
 }

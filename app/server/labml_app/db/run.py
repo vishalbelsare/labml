@@ -3,15 +3,15 @@ from typing import Dict, List, Optional, Union, NamedTuple
 
 from fastapi import Request
 
-from labml_db import Model, Key, Index
+from labml_db import Model, Key, Index, load_keys
 
 from .. import auth
 from . import user
-from .. import utils
 from . import project
 from . import computer
 from . import status
 from .. import settings
+from ..analyses.computers.process import ProcessAnalysis, ExperimentProcess
 from ..logger import logger
 from .. import analyses
 from ..enums import RunEnums
@@ -35,6 +35,8 @@ class Run(Model['Run']):
     start_time: float
     run_ip: str
     run_uuid: str
+    rank: int
+    world_size: int
     python_file: str
     repo_remotes: str
     commit: str
@@ -44,6 +46,10 @@ class Run(Model['Run']):
     status: Key['status.Status']
     configs: Dict[str, any]
     computer_uuid: str
+    pid: int
+    process_id: str
+    process_key: Key['ExperimentProcess']
+    session_id: str
     size: float
     size_checkpoints: float
     size_tensorboard: float
@@ -54,6 +60,10 @@ class Run(Model['Run']):
     logger_unmerged: str
     stderr: str
     stderr_unmerged: str
+    selected_configs: List['str']
+    favourite_configs: List['str']
+    main_rank: int
+    parent_folder: str  # delete from saved db and then remove
 
     wildcard_indicators: Dict[str, Dict[str, Union[str, bool]]]
     indicators: Dict[str, Dict[str, Union[str, bool]]]
@@ -68,6 +78,8 @@ class Run(Model['Run']):
                     tags=[],
                     start_time=None,
                     run_uuid='',
+                    rank=0,
+                    world_size=0,
                     python_file='',
                     repo_remotes='',
                     commit='',
@@ -90,12 +102,20 @@ class Run(Model['Run']):
                     stderr_unmerged='',
                     wildcard_indicators={},
                     indicators={},
-                    errors=[]
+                    errors=[],
+                    selected_configs=[],
+                    favourite_configs=[],
+                    pid=0,
+                    process_id='',
+                    process_key=None,
+                    session_id='',
+                    main_rank=0,
+                    parent_folder=""
                     )
 
     @property
     def url(self) -> str:
-        return f'{settings.WEB_URL}/run/{self.run_uuid}'
+        return f'run/{self.run_uuid}'
 
     @property
     def is_in_progress(self) -> bool:
@@ -126,13 +146,28 @@ class Run(Model['Run']):
 
         self.save()
 
+    def _update_configs(self, configs):
+        self.configs.update(configs)
+
+        defaults = {}
+        for k, v in configs.items():
+            computed = v['computed']
+            name = v['name']
+            if computed and type(computed) == dict and computed.get('type', '') == 'DynamicSchedule':
+                defaults[name] = computed
+
+        if defaults:
+            hp_analysis = analyses.AnalysisManager.get_experiment_analysis('HyperParamsAnalysis', self.run_uuid)
+            if hp_analysis is not None:
+                hp_analysis.set_default_values(defaults)
+
     def update_run(self, data: Dict[str, any]) -> None:
         if not self.name:
             self.name = data.get('name', '')
         if not self.comment:
             self.comment = data.get('comment', '')
         if not self.tags:
-            self.tags = data.get('tags', '')
+            self.tags = data.get('tags', [])
         if not self.python_file:
             self.python_file = data.get('python_file', '')
         if not self.repo_remotes:
@@ -146,64 +181,56 @@ class Run(Model['Run']):
         if not self.computer_uuid:
             self.computer_uuid = data.get('computer', '')
             computer.add_run(self.computer_uuid, self.run_uuid)
+        if self.pid == 0:
+            self.pid = data.get('pid', 0)
+
+        if 'main_rank' in data:
+            self.main_rank = data.get('main_rank', 0)
 
         if 'configs' in data:
             configs = data.get('configs', {})
-            self.configs.update(configs)
+            self._update_configs(configs)
 
-            defaults = {}
-            for k, v in configs.items():
-                computed = v['computed']
-                name = v['name']
-                if computed and type(computed) == dict and computed.get('type', '') == 'DynamicSchedule':
-                    defaults[name] = computed
-
-            if defaults:
-                analyses.AnalysisManager.get_experiment_analysis('HyperParamsAnalysis',
-                                                                 self.run_uuid).set_default_values(defaults)
-
-        if 'stdout' in data and data['stdout']:
-            stdout_processed, self.stdout_unmerged = self.merge_output(self.stdout_unmerged, data['stdout'])
-            self.stdout += stdout_processed
-        if 'logger' in data and data['logger']:
-            logger_processed, self.logger_unmerged = self.merge_output(self.logger_unmerged, data['logger'])
-            self.logger += logger_processed
-        if 'stderr' in data and data['stderr']:
-            stderr_processed, self.stderr_unmerged = self.merge_output(self.stderr_unmerged, data['stderr'])
-            self.stderr += stderr_processed
+        if 'favorite_configs' in data:
+            self.favourite_configs = data.get('favorite_configs', [])
+        if 'selected_configs' in data:
+            self.selected_configs = data.get('selected_configs', [])
 
         if not self.indicators:
             self.indicators = data.get('indicators', {})
         if not self.wildcard_indicators:
             self.wildcard_indicators = data.get('wildcard_indicators', {})
 
+        if not self.process_id and self.computer_uuid and self.pid != 0:
+            # get sessions with the computer_uuid
+            sessions_keys = computer.get_or_create(self.computer_uuid).get_sessions()
+
+            for session_key in sessions_keys:
+                ans = ProcessAnalysis.get_or_create(session_key)
+                if ans:
+                    track_data, _ = ans.get_tracking()
+                    for track_item in track_data:
+                        if track_item['pid'] == self.pid:  # found the process
+                            ans = ProcessAnalysis.get_or_create(session_key)
+                            if not ans:
+                                continue
+                            data = ans.get_process(track_item['process_id'])
+                            experiment_process = ExperimentProcess()
+                            data['run_uuid'] = self.run_uuid
+                            experiment_process.load_data(data)
+                            experiment_process.save()
+
+                            # save experiment process on process model
+                            ans.add_experiment_process(track_item['process_id'], experiment_process.key)
+
+                            # save experiment process on run
+                            self.process_key = experiment_process.key
+                            self.process_id = data['process_id']
+                            self.session_id = session_key
+
+                            break
+
         self.save()
-
-    def merge_output(self, unmerged: str, new: str) -> (str, str):
-        unmerged += new
-        processed = ''
-        if len(new) > 1:
-            processed, unmerged = self.format_output(unmerged)
-
-        return processed, unmerged
-
-    @staticmethod
-    def format_output(output: str) -> (str, str):
-        res = []
-        temp = ''
-        for i, c in enumerate(output):
-            if c == '\n':
-                temp += '\n'
-                res.append(temp)
-                temp = ''
-            elif c == '\r' and len(output) > i + 1 and output[i + 1] == '\n':
-                pass
-            elif c == '\r':
-                temp = ''
-            else:
-                temp += c
-
-        return ''.join(res), temp
 
     @staticmethod
     def format_remote_repo(urls: str) -> str:
@@ -234,7 +261,16 @@ class Run(Model['Run']):
 
         return url + f'/commit/{commit}'
 
-    def get_data(self, request: Request) -> Dict[str, Union[str, any]]:
+    def get_rank_uuids(self) -> Dict[int, str]:
+        if self.rank == 0 and self.world_size > 1:
+            other_rank_run_uuids = \
+                {rank: f'{self.run_uuid}_{rank}' if rank != 0 else self.run_uuid for rank in range(self.world_size)}
+        else:
+            other_rank_run_uuids = {}
+
+        return other_rank_run_uuids
+
+    def get_data(self, request: Request, is_dist_run: bool = False) -> Dict[str, Union[str, any]]:
         u = auth.get_auth_user(request)
         if u:
             is_project_run = u.default_project.is_project_run(self.run_uuid)
@@ -244,8 +280,13 @@ class Run(Model['Run']):
         configs = [{'key': k, **c} for k, c in self.configs.items()]
         formatted_repo = self.format_remote_repo(self.repo_remotes)
 
+        other_rank_run_uuids = self.get_rank_uuids()
+
         return {
             'run_uuid': self.run_uuid,
+            'rank': self.rank,
+            'other_rank_run_uuids': other_rank_run_uuids,
+            'world_size': self.world_size,
             'is_project_run': is_project_run,
             'name': self.name,
             'comment': self.comment,
@@ -263,18 +304,25 @@ class Run(Model['Run']):
             'size_tensorboard': self.size_tensorboard,
             'computer_uuid': self.computer_uuid,
             'configs': configs,
-            'stdout': self.stdout + self.stdout_unmerged,
-            'logger': self.logger + self.logger_unmerged,
-            'stderr': self.stderr + self.stderr_unmerged,
+            'favourite_configs': self.favourite_configs,
+            'selected_configs': self.selected_configs,
+            'process_id': self.process_id,
+            'session_id': self.session_id,
         }
 
     def get_summary(self) -> Dict[str, str]:
+        fav_configs = [{'key': key, **self.configs[key]} for key in self.configs.keys() if
+                       key in self.favourite_configs]
+
         return {
             'run_uuid': self.run_uuid,
             'computer_uuid': self.computer_uuid,
             'name': self.name,
             'comment': self.comment,
             'start_time': self.start_time,
+            'world_size': self.world_size,
+            'favorite_configs': fav_configs,
+            'tags': self.tags,
         }
 
     def edit_run(self, data: Dict[str, any]) -> None:
@@ -285,6 +333,31 @@ class Run(Model['Run']):
         if 'note' in data:
             self.note = data.get('note', self.note)
 
+        if 'configs' in data:
+            configs = data.get('configs', self.configs)
+            self._update_configs(configs)
+
+        if 'favourite_configs' in data:
+            self.favourite_configs = data.get('favourite_configs', self.favourite_configs)
+        if 'selected_configs' in data:
+            self.selected_configs = data.get('selected_configs', self.selected_configs)
+
+        if 'tags' in data:
+            self.tags = data.get('tags', self.tags)
+
+        if self.world_size > 0:
+            run_uuids = [f'{self.run_uuid}_{rank}' for rank in range(1, self.world_size)]
+            runs = mget(run_uuids)
+            runs = [r for r in runs if r]  # todo check why there are empty ranks
+            for r in runs:
+                r.name = self.name
+                r.note = self.note
+                r.comment = self.comment
+                r.favourite_configs = self.favourite_configs
+                r.selected_configs = self.selected_configs
+            if len(runs) != 0:
+                Run.msave(runs)
+
         self.save()
 
 
@@ -292,41 +365,44 @@ class RunIndex(Index['Run']):
     pass
 
 
-def get_or_create(request: Request, run_uuid: str, labml_token: str = '') -> 'Run':
+def get_or_create(request: Request, run_uuid: str, rank: int, world_size: int, main_rank: int, labml_token: str = '') -> 'Run':
     p = project.get_project(labml_token)
 
-    if run_uuid in p.runs:
-        return p.runs[run_uuid].load()
+    if p.is_project_run(run_uuid):
+        return p.get_run(run_uuid)
+
+    run = get(run_uuid)
+    if run is not None:
+        return run
 
     if labml_token == settings.FLOAT_PROJECT_TOKEN:
         is_claimed = False
         identifier = ''
     else:
         is_claimed = True
-
         identifier = user.get_token_owner(labml_token)
-        utils.analytics.AnalyticsEvent.track(request, 'run_claimed', {'run_uuid': run_uuid}, identifier=identifier)
-        utils.analytics.AnalyticsEvent.run_claimed_set(identifier)
 
     time_now = time.time()
 
     s = status.create_status()
     run = Run(run_uuid=run_uuid,
+              rank=rank,
+              world_size=world_size,
               owner=identifier,
               start_time=time_now,
               run_ip=request.client.host,
               is_claimed=is_claimed,
               status=s.key,
+              main_rank=main_rank,
               )
-    p.runs[run.run_uuid] = run.key
-    p.is_run_added = True
+
+    if run.rank == 0:  # TODO
+        p.add_run_with_model(run)
 
     run.save()
     p.save()
 
     RunIndex.set(run.run_uuid, run.key)
-
-    utils.analytics.AnalyticsEvent.track(request, 'run_created', {'run_uuid': run_uuid, 'labml_token': labml_token})
 
     return run
 
@@ -336,6 +412,10 @@ def delete(run_uuid: str) -> None:
 
     if r:
         s = r.status.load()
+
+        if r.process_key:
+            process = r.process_key.load()
+            process.delete()
 
         computer.remove_run(r.computer_uuid, run_uuid)
 
@@ -348,10 +428,8 @@ def delete(run_uuid: str) -> None:
 
 
 def get_runs(labml_token: str) -> List['Run']:
-    res = []
     p = project.get_project(labml_token)
-    for run_uuid, run_key in p.runs.items():
-        res.append(run_key.load())
+    res = p.get_runs()
 
     return res
 
@@ -365,6 +443,11 @@ def get(run_uuid: str) -> Optional['Run']:
     return None
 
 
+def mget(run_uuids: List[str]) -> List[Optional['Run']]:
+    run_keys = RunIndex.mget(run_uuids)
+    return load_keys(run_keys)
+
+
 def get_status(run_uuid: str) -> Union[None, 'status.Status']:
     r = get(run_uuid)
 
@@ -372,3 +455,52 @@ def get_status(run_uuid: str) -> Union[None, 'status.Status']:
         return r.status.load()
 
     return None
+
+
+def get_merged_status_data(run_uuids: List[str]) -> Union[None, 'status.Status']:
+    r = mget(run_uuids)
+    status_keys = [run.status for run in r if run]
+    status_list = load_keys(status_keys)
+    run_status_keys = [s.run_status for s in status_list if s]
+    run_status_list = load_keys(run_status_keys)
+
+    status_data_list = [s.get_data(run_status.to_dict())
+                        for s, run_status in zip(status_list, run_status_list) if s and run_status]
+
+    if len(status_data_list) == 0:
+        return None
+
+    status_data = status_data_list[0]
+    status_data['last_updated_time'] = max([s['last_updated_time'] for s in status_data_list])
+    status_data['run_status']['time'] = max([s['run_status']['time'] for s in status_data_list])
+
+    status_priority = {
+        RunEnums.RUN_IN_PROGRESS: 1,
+        RunEnums.RUN_COMPLETED: 2,
+        RunEnums.RUN_CRASHED: 3,
+        RunEnums.RUN_INTERRUPTED: 4,
+        RunEnums.RUN_NOT_RESPONDING: 5,
+        RunEnums.RUN_UNKNOWN: 6,
+    }
+    status_data['run_status']['status'] = min([s['run_status']['status'] for s in status_data_list],
+                                              key=lambda x: status_priority[x])
+
+    return status_data
+
+
+def get_main_rank(run_uuid: str) -> Optional[str]:
+    is_rank = len(run_uuid.split("_")) == 2
+
+    if is_rank:
+        if run_uuid.split('_')[-1] == 0:  # first rank is the main uuid
+            return run_uuid.split('_')[0]
+        else:
+            return run_uuid
+    else:
+        r = get(run_uuid)
+        if r is None:
+            return None
+        other_rank_run_uuids = r.get_rank_uuids()
+        if r.world_size != 0 and other_rank_run_uuids:
+            return other_rank_run_uuids[r.main_rank]
+        return run_uuid

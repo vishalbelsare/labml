@@ -1,39 +1,73 @@
-import {WeyaElementFunction} from '../../../lib/weya/weya'
-import Timeout = NodeJS.Timeout
+import {WeyaElement, WeyaElementFunction} from '../../../lib/weya/weya'
+import {Loader} from "./loader"
 
 export interface SearchOptions {
     onSearch: (query: string) => void
+    initText?: string
+    searchOnChange?: boolean
 }
 
 export class SearchView {
     onSearch: () => void
     textbox: HTMLInputElement
-    inputTimeout: Timeout
+    initText: string
+    loader: Loader
+    elem: WeyaElement
+    searchOnChange: boolean
 
     constructor(opt: SearchOptions) {
         this.onSearch = () => {
-            clearTimeout(this.inputTimeout)
-            this.inputTimeout = setTimeout(() => {
-                opt.onSearch(this.textbox.value)
-            }, 250)
+            opt.onSearch(this.textbox.value)
         }
+        this.initText = opt.initText ?? ""
+        this.loader = new Loader()
+        this.searchOnChange = opt.searchOnChange ?? false
     }
 
     render($: WeyaElementFunction) {
-        $('div', '.search-container.mt-3.mb-3.px-2', $ => {
+        this.elem = $('div', '.search-container.mt-3.mb-3.px-2', $ => {
             $('div', '.search-content', $ => {
-                $('span', '.icon', $=>{
+                $('span', '.icon', $ => {
                     $('span', '.fas.fa-search', '')
                 })
                 this.textbox = $('input', '.search-input', {
+                    value: this.initText,
                     type: 'search',
                     placeholder: 'Search',
                     'aria-label': 'Search',
-                    on: {
-                        input: this.onSearch
-                    }
                 })
+                this.loader.render($)
+                this.loader.hide(true)
             })
         })
+
+        this.textbox.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                this.onSearch()
+            }
+        })
+
+        if (this.searchOnChange) {
+            this.textbox.addEventListener('input', () => {
+                this.onSearch()
+            })
+        }
+    }
+
+    public hideLoader(isHide: boolean) {
+        this.loader.hide(isHide)
+    }
+
+    public disable(disabled: boolean) {
+        this.textbox.disabled = disabled
+        if (disabled) {
+            this.elem.style.opacity = '0.3'
+        } else {
+            this.elem.style.opacity = '1'
+        }
+    }
+
+    public focus() {
+        this.textbox.focus()
     }
 }

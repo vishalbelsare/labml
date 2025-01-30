@@ -1,47 +1,30 @@
 
-
-
 <!DOCTYPE html>
-<!--[if IE 8]><html class="no-js lt-ie9" lang="en" > <![endif]-->
-<!--[if gt IE 8]><!--> <html class="no-js" lang="en" > <!--<![endif]-->
+<html class="writer-html5" lang="en" data-content_root="./">
 <head>
-  <meta charset="utf-8">
-  
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  
-  <title>Search &mdash; labml.ai client library 0.4 documentation</title>
-  
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Search &mdash; labml library 0.5 documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=fa44fd50" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=19f00094" />
+      <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.css" />
+      <link rel="stylesheet" type="text/css" href="_static/katex-math.css?v=91adb8b6" />
+      <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.css" />
 
-  
   
     <link rel="shortcut icon" href="_static/lab_icon.png"/>
-  
-  
-  
-    <link rel="canonical" href="https://docs.labml.ai/search.html"/>
-  
-
-  
-  <script type="text/javascript" src="_static/js/modernizr.min.js"></script>
-  
+    <link rel="canonical" href="https://docs.labml.ai/search.html" />
     
-      <script type="text/javascript" id="documentation_options" data-url_root="./" src="_static/documentation_options.js"></script>
-        <script src="_static/jquery.js"></script>
-        <script src="_static/underscore.js"></script>
-        <script src="_static/doctools.js"></script>
-        <script src="_static/language_data.js"></script>
-        <script src="_static/searchtools.js"></script>
-    
-    <script type="text/javascript" src="_static/js/theme.js"></script>
-
-    
-
+  <!--[if lt IE 9]>
+    <script src="_static/js/html5shiv.min.js"></script>
+  <![endif]-->
   
-  <link rel="stylesheet" href="_static/css/theme.css" type="text/css" />
-  <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.css" type="text/css" />
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.11.1/dist/katex.min.css" type="text/css" />
-  <link rel="stylesheet" href="_static/katex-math.css" type="text/css" />
+        <script src="_static/documentation_options.js?v=db78e746"></script>
+        <script src="_static/doctools.js?v=9a2dae69"></script>
+        <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/js/theme.js"></script>
+    <script src="_static/searchtools.js"></script>
+    <script src="_static/language_data.js"></script>
     <link rel="index" title="Index" href="genindex.html" />
     <link rel="search" title="Search" href="#" />
     <!-- Global site tag (gtag.js) - Google Analytics -->
@@ -57,63 +40,69 @@
  
 </head>
 
-<body class="wy-body-for-nav">
-
-   
+<body class="wy-body-for-nav"> 
   <div class="wy-grid-for-nav">
-    
     <nav data-toggle="wy-nav-shift" class="wy-nav-side">
       <div class="wy-side-scroll">
         <div class="wy-side-nav-search" >
-          
 
           
-            <a href="index.html" class="icon icon-home"> labml.ai client library
           
-
-          
+          <a href="index.html" class="icon icon-home">
+            labml library
           </a>
-
-          
-            
-            
-          
-
-          
 <div role="search">
   <form id="rtd-search-form" class="wy-form" action="#" method="get">
-    <input type="text" name="q" placeholder="Search docs" />
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
     <input type="hidden" name="check_keywords" value="yes" />
     <input type="hidden" name="area" value="default" />
   </form>
 </div>
-
-          
-        </div>
-
-        <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
-          
-            
-            
-              
-            
-            
-              <ul>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">API</span></p>
+<ul>
 <li class="toctree-l1"><a class="reference internal" href="api/experiment.html">Experiment</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="api/experiment.html#create-experiment">Create Experiment</a></li>
-<li class="toctree-l2"><a class="reference internal" href="api/experiment.html#checkpoints">Checkpoints</a></li>
-<li class="toctree-l2"><a class="reference internal" href="api/experiment.html#configurations-hyper-parameters">Configurations &amp; Hyper-parameters</a></li>
-<li class="toctree-l2"><a class="reference internal" href="api/experiment.html#bundle-checkpoints">Bundle checkpoints</a></li>
-<li class="toctree-l2"><a class="reference internal" href="api/experiment.html#distirbuted-training">Distirbuted training</a></li>
-<li class="toctree-l2"><a class="reference internal" href="api/experiment.html#utilities">Utilities</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/experiment.html#create-experiment">Create Experiment</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api/experiment.html#labml.experiment.create"><code class="docutils literal notranslate"><span class="pre">create()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/experiment.html#labml.experiment.record"><code class="docutils literal notranslate"><span class="pre">record()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/experiment.html#labml.experiment.evaluate"><code class="docutils literal notranslate"><span class="pre">evaluate()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/experiment.html#labml.experiment.start"><code class="docutils literal notranslate"><span class="pre">start()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/experiment.html#labml.experiment.get_uuid"><code class="docutils literal notranslate"><span class="pre">get_uuid()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="api/experiment.html#configurations-hyper-parameters">Configurations &amp; Hyper-parameters</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api/experiment.html#labml.experiment.configs"><code class="docutils literal notranslate"><span class="pre">configs()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/experiment.html#labml.experiment.load_configs"><code class="docutils literal notranslate"><span class="pre">load_configs()</span></code></a></li>
+</ul>
+</li>
 </ul>
 </li>
 <li class="toctree-l1"><a class="reference internal" href="api/tracker.html">Tracker</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="api/tracker.html#track">Track</a></li>
-<li class="toctree-l2"><a class="reference internal" href="api/tracker.html#step">Step</a></li>
-<li class="toctree-l2"><a class="reference internal" href="api/tracker.html#setup">Setup</a></li>
-<li class="toctree-l2"><a class="reference internal" href="api/tracker.html#namespaces">Namespaces</a></li>
-<li class="toctree-l2"><a class="reference internal" href="api/tracker.html#helpers">Helpers</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/tracker.html#track">Track</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api/tracker.html#labml.tracker.save"><code class="docutils literal notranslate"><span class="pre">save()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/tracker.html#labml.tracker.add"><code class="docutils literal notranslate"><span class="pre">add()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="api/tracker.html#step">Step</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api/tracker.html#labml.tracker.set_global_step"><code class="docutils literal notranslate"><span class="pre">set_global_step()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/tracker.html#labml.tracker.add_global_step"><code class="docutils literal notranslate"><span class="pre">add_global_step()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/tracker.html#labml.tracker.get_global_step"><code class="docutils literal notranslate"><span class="pre">get_global_step()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="api/tracker.html#setup">Setup</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api/tracker.html#labml.tracker.set_histogram"><code class="docutils literal notranslate"><span class="pre">set_histogram()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/tracker.html#labml.tracker.set_scalar"><code class="docutils literal notranslate"><span class="pre">set_scalar()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="api/tracker.html#namespaces">Namespaces</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api/tracker.html#labml.tracker.namespace"><code class="docutils literal notranslate"><span class="pre">namespace()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="api/tracker.html#helpers">Helpers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api/tracker.html#labml.tracker.reset"><code class="docutils literal notranslate"><span class="pre">reset()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/tracker.html#labml.tracker.new_line"><code class="docutils literal notranslate"><span class="pre">new_line()</span></code></a></li>
+</ul>
+</li>
 </ul>
 </li>
 <li class="toctree-l1"><a class="reference internal" href="api/framework_integrations.html">Framework Integrations</a><ul>
@@ -123,113 +112,159 @@
 </ul>
 </li>
 <li class="toctree-l1"><a class="reference internal" href="api/monit.html">Monitor</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="api/monit.html#basic">Basic</a></li>
-<li class="toctree-l2"><a class="reference internal" href="api/monit.html#iterators">Iterators</a></li>
-<li class="toctree-l2"><a class="reference internal" href="api/monit.html#loop">Loop</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/monit.html#basic">Basic</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api/monit.html#labml.monit.section"><code class="docutils literal notranslate"><span class="pre">section()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/monit.html#labml.monit.func"><code class="docutils literal notranslate"><span class="pre">func()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/monit.html#labml.monit.progress"><code class="docutils literal notranslate"><span class="pre">progress()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/monit.html#labml.monit.fail"><code class="docutils literal notranslate"><span class="pre">fail()</span></code></a></li>
 </ul>
 </li>
-<li class="toctree-l1"><a class="reference internal" href="api/analytics.html">Analytics</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="api/analytics.html#probing">Probing</a></li>
-<li class="toctree-l2"><a class="reference internal" href="api/analytics.html#get-data">Get data</a></li>
-<li class="toctree-l2"><a class="reference internal" href="api/analytics.html#plot">Plot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/monit.html#iterators">Iterators</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api/monit.html#labml.monit.iterate"><code class="docutils literal notranslate"><span class="pre">iterate()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/monit.html#labml.monit.enum"><code class="docutils literal notranslate"><span class="pre">enum()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/monit.html#labml.monit.mix"><code class="docutils literal notranslate"><span class="pre">mix()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="api/monit.html#loop">Loop</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api/monit.html#labml.monit.loop"><code class="docutils literal notranslate"><span class="pre">loop()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/monit.html#labml.monit.finish_loop"><code class="docutils literal notranslate"><span class="pre">finish_loop()</span></code></a></li>
+</ul>
+</li>
 </ul>
 </li>
 <li class="toctree-l1"><a class="reference internal" href="api/configs.html">Configs</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="api/configs.html#dynamic-hyper-parameters">Dynamic Hyper-parameters</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/configs.html#labml.configs.BaseConfigs"><code class="docutils literal notranslate"><span class="pre">BaseConfigs</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/configs.html#labml.configs.option"><code class="docutils literal notranslate"><span class="pre">option()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/configs.html#labml.configs.calculate"><code class="docutils literal notranslate"><span class="pre">calculate()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/configs.html#labml.configs.hyperparams"><code class="docutils literal notranslate"><span class="pre">hyperparams()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/configs.html#labml.configs.meta_config"><code class="docutils literal notranslate"><span class="pre">meta_config()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/configs.html#labml.configs.aggregate"><code class="docutils literal notranslate"><span class="pre">aggregate()</span></code></a></li>
 </ul>
 </li>
 <li class="toctree-l1"><a class="reference internal" href="api/logger.html">Logger</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="api/logger.html#styling">Styling</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/logger.html#labml.logger.log"><code class="docutils literal notranslate"><span class="pre">log()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/logger.html#labml.logger.inspect"><code class="docutils literal notranslate"><span class="pre">inspect()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/logger.html#styling">Styling</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api/logger.html#labml.logger.Text"><code class="docutils literal notranslate"><span class="pre">Text</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="api/logger.html#labml.logger.Text.danger"><code class="docutils literal notranslate"><span class="pre">Text.danger</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/logger.html#labml.logger.Text.heading"><code class="docutils literal notranslate"><span class="pre">Text.heading</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/logger.html#labml.logger.Text.highlight"><code class="docutils literal notranslate"><span class="pre">Text.highlight</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/logger.html#labml.logger.Text.key"><code class="docutils literal notranslate"><span class="pre">Text.key</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/logger.html#labml.logger.Text.link"><code class="docutils literal notranslate"><span class="pre">Text.link</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/logger.html#labml.logger.Text.meta"><code class="docutils literal notranslate"><span class="pre">Text.meta</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/logger.html#labml.logger.Text.meta2"><code class="docutils literal notranslate"><span class="pre">Text.meta2</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/logger.html#labml.logger.Text.none"><code class="docutils literal notranslate"><span class="pre">Text.none</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/logger.html#labml.logger.Text.subtle"><code class="docutils literal notranslate"><span class="pre">Text.subtle</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/logger.html#labml.logger.Text.success"><code class="docutils literal notranslate"><span class="pre">Text.success</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/logger.html#labml.logger.Text.title"><code class="docutils literal notranslate"><span class="pre">Text.title</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/logger.html#labml.logger.Text.warning"><code class="docutils literal notranslate"><span class="pre">Text.warning</span></code></a></li>
 </ul>
 </li>
-<li class="toctree-l1"><a class="reference internal" href="api/lab.html">Lab</a></li>
-<li class="toctree-l1"><a class="reference internal" href="api/manage.html">Manage</a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/logger.html#labml.logger.Style"><code class="docutils literal notranslate"><span class="pre">Style</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="api/logger.html#labml.logger.Style.bold"><code class="docutils literal notranslate"><span class="pre">Style.bold</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/logger.html#labml.logger.Style.light"><code class="docutils literal notranslate"><span class="pre">Style.light</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/logger.html#labml.logger.Style.none"><code class="docutils literal notranslate"><span class="pre">Style.none</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/logger.html#labml.logger.Style.normal"><code class="docutils literal notranslate"><span class="pre">Style.normal</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/logger.html#labml.logger.Style.underline"><code class="docutils literal notranslate"><span class="pre">Style.underline</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="api/logger.html#labml.logger.Color"><code class="docutils literal notranslate"><span class="pre">Color</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="api/logger.html#labml.logger.Color.black"><code class="docutils literal notranslate"><span class="pre">Color.black</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/logger.html#labml.logger.Color.blue"><code class="docutils literal notranslate"><span class="pre">Color.blue</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/logger.html#labml.logger.Color.cyan"><code class="docutils literal notranslate"><span class="pre">Color.cyan</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/logger.html#labml.logger.Color.green"><code class="docutils literal notranslate"><span class="pre">Color.green</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/logger.html#labml.logger.Color.none"><code class="docutils literal notranslate"><span class="pre">Color.none</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/logger.html#labml.logger.Color.orange"><code class="docutils literal notranslate"><span class="pre">Color.orange</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/logger.html#labml.logger.Color.purple"><code class="docutils literal notranslate"><span class="pre">Color.purple</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/logger.html#labml.logger.Color.red"><code class="docutils literal notranslate"><span class="pre">Color.red</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="api/logger.html#labml.logger.Color.white"><code class="docutils literal notranslate"><span class="pre">Color.white</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="api/logger.html#labml.logger.StyleCode"><code class="docutils literal notranslate"><span class="pre">StyleCode</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="api/lab.html">Lab</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="api/lab.html#labml.lab.get_computer_name"><code class="docutils literal notranslate"><span class="pre">get_computer_name()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/lab.html#labml.lab.get_computer_uuid"><code class="docutils literal notranslate"><span class="pre">get_computer_uuid()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/lab.html#labml.lab.get_info"><code class="docutils literal notranslate"><span class="pre">get_info()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/lab.html#labml.lab.get_path"><code class="docutils literal notranslate"><span class="pre">get_path()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/lab.html#labml.lab.get_data_path"><code class="docutils literal notranslate"><span class="pre">get_data_path()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/lab.html#labml.lab.get_experiments_path"><code class="docutils literal notranslate"><span class="pre">get_experiments_path()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/lab.html#labml.lab.configure"><code class="docutils literal notranslate"><span class="pre">configure()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="api/manage.html">Manage</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="api/manage.html#labml.manage.new_run"><code class="docutils literal notranslate"><span class="pre">new_run()</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/manage.html#labml.manage.new_run_process"><code class="docutils literal notranslate"><span class="pre">new_run_process()</span></code></a></li>
+</ul>
+</li>
 <li class="toctree-l1"><a class="reference internal" href="api/utils.html">Utils</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="api/utils.html#cache">Cache</a></li>
-<li class="toctree-l2"><a class="reference internal" href="api/utils.html#keyboard-interrupt">Keyboard Interrupt</a></li>
-<li class="toctree-l2"><a class="reference internal" href="api/utils.html#downloading">Downloading</a></li>
-<li class="toctree-l2"><a class="reference internal" href="api/utils.html#pytorch">PyTorch</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/utils.html#cache">Cache</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api/utils.html#labml.utils.cache.cache"><code class="docutils literal notranslate"><span class="pre">cache()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/utils.html#labml.utils.cache.cache_get"><code class="docutils literal notranslate"><span class="pre">cache_get()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/utils.html#labml.utils.cache.cache_set"><code class="docutils literal notranslate"><span class="pre">cache_set()</span></code></a></li>
 </ul>
 </li>
-<li class="toctree-l1"><a class="reference internal" href="api/helpers.html">Helpers</a><ul>
-<li class="toctree-l2"><a class="reference internal" href="api/helpers.html#configurable-modules">Configurable Modules</a></li>
-<li class="toctree-l2"><a class="reference internal" href="api/helpers.html#datasets">Datasets</a><ul>
-<li class="toctree-l3"><a class="reference internal" href="api/helpers.html#remote">Remote</a></li>
-<li class="toctree-l3"><a class="reference internal" href="api/helpers.html#text-datasets">Text Datasets</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/utils.html#keyboard-interrupt">Keyboard Interrupt</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api/utils.html#labml.utils.delayed_keyboard_interrupt.DelayedKeyboardInterrupt"><code class="docutils literal notranslate"><span class="pre">DelayedKeyboardInterrupt</span></code></a></li>
 </ul>
 </li>
-<li class="toctree-l2"><a class="reference internal" href="api/helpers.html#schedules">Schedules</a></li>
-<li class="toctree-l2"><a class="reference internal" href="api/helpers.html#metrics">Metrics</a></li>
-<li class="toctree-l2"><a class="reference internal" href="api/helpers.html#utilies">Utilies</a></li>
+<li class="toctree-l2"><a class="reference internal" href="api/utils.html#downloading">Downloading</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api/utils.html#labml.utils.download.download_file"><code class="docutils literal notranslate"><span class="pre">download_file()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/utils.html#labml.utils.download.extract_tar"><code class="docutils literal notranslate"><span class="pre">extract_tar()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="api/utils.html#pytorch">PyTorch</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="api/utils.html#labml.utils.pytorch.store_model_indicators"><code class="docutils literal notranslate"><span class="pre">store_model_indicators()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/utils.html#labml.utils.pytorch.store_optimizer_indicators"><code class="docutils literal notranslate"><span class="pre">store_optimizer_indicators()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/utils.html#labml.utils.pytorch.get_modules"><code class="docutils literal notranslate"><span class="pre">get_modules()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="api/utils.html#labml.utils.pytorch.get_device"><code class="docutils literal notranslate"><span class="pre">get_device()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">CLI</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="cli/labml.html">labml</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="cli/labml.html#synopsis">Synopsis</a></li>
+<li class="toctree-l2"><a class="reference internal" href="cli/labml.html#options">Options</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="cli/labml.html#commands">Commands</a></li>
+</ul>
+</li>
 </ul>
 </li>
 </ul>
 
-            
-          
         </div>
       </div>
     </nav>
 
-    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
-
-      
-      <nav class="wy-nav-top" aria-label="top navigation">
-        
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
           <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
-          <a href="index.html">labml.ai client library</a>
-        
+          <a href="index.html">labml library</a>
       </nav>
 
-
       <div class="wy-nav-content">
-        
         <div class="rst-content">
-        
-          
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-<div role="navigation" aria-label="breadcrumbs navigation">
-
+          <div role="navigation" aria-label="Page navigation">
   <ul class="wy-breadcrumbs">
-    
-      <li><a href="index.html">Docs</a> &raquo;</li>
-        
-      <li>Search</li>
-    
-    
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">Search</li>
       <li class="wy-breadcrumbs-aside">
-        
-            
-        
       </li>
-    
   </ul>
-
-  
   <hr/>
 </div>
           <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
            <div itemprop="articleBody">
-            
+             
   <noscript>
   <div id="fallback" class="admonition warning">
     <p class="last">
-      Please activate JavaScript to enable the search
-      functionality.
+      Please activate JavaScript to enable the search functionality.
     </p>
   </div>
   </noscript>
@@ -240,47 +275,35 @@
   </div>
 
            </div>
-           
           </div>
           <footer>
-  
 
   <hr/>
 
   <div role="contentinfo">
-    <p>
-        &copy; Copyright 2020-2022, labml.ai contributors
-
-    </p>
+    <p>&#169; Copyright 2020-2024, labml.ai contributors.</p>
   </div>
-  Built with <a href="http://sphinx-doc.org/">Sphinx</a> using a <a href="https://github.com/rtfd/sphinx_rtd_theme">theme</a> provided by <a href="https://readthedocs.org">Read the Docs</a>. 
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
 
 </footer>
-
         </div>
       </div>
-
     </section>
-
   </div>
-  
-
-
-  <script type="text/javascript">
+  <script>
       jQuery(function () {
           SphinxRtdTheme.Navigation.enable(true);
       });
   </script>
-
-  
-  
-    
-  
-  <script type="text/javascript">
+  <script>
     jQuery(function() { Search.loadIndex("searchindex.js"); });
   </script>
   
-  <script type="text/javascript" id="searchindexloader"></script>
+  <script id="searchindexloader"></script>
    
 
 

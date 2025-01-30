@@ -1,17 +1,13 @@
-from typing import Dict, Any
+from typing import Dict, Any, List, Optional
 
-from fastapi import Request
-from fastapi.responses import JSONResponse
-from labml_db import Model, Index
+from labml_db import Model, Index, load_keys
 from labml_db.serializer.pickle import PickleSerializer
 from labml_db.serializer.yaml import YamlSerializer
 
-from labml_app.logger import logger
 from labml_app.enums import INDICATORS
 from ..analysis import Analysis
 from ..series import SeriesModel, Series
 from ..series_collection import SeriesCollection
-from ..preferences import Preferences
 from labml_app.settings import INDICATOR_LIMIT
 
 
@@ -20,19 +16,14 @@ class MetricsModel(Model['MetricsModel'], SeriesCollection):
     pass
 
 
-@Analysis.db_model(PickleSerializer, 'metrics_preferences')
-class MetricsPreferencesModel(Model['MetricsPreferencesModel'], Preferences):
-    pass
-
-
-@Analysis.db_index(YamlSerializer, 'metrics_preferences_index.yaml')
-class MetricsPreferencesIndex(Index['MetricsPreferences']):
-    pass
-
-
 @Analysis.db_index(YamlSerializer, 'metrics_index.yaml')
 class MetricsIndex(Index['Metrics']):
     pass
+
+
+def mget(run_uuids: List[str]) -> List[Optional['MetricsAnalysis']]:
+    run_keys = MetricsIndex.mget(run_uuids)
+    return load_keys(run_keys)
 
 
 class MetricsAnalysis(Analysis):
@@ -41,8 +32,9 @@ class MetricsAnalysis(Analysis):
     def __init__(self, data):
         self.metrics = data
 
-    def track(self, data: Dict[str, SeriesModel]):
+    def track(self, data: Dict[str, SeriesModel], run_uuid: str = None) -> int:
         res = {}
+        new_indicators = set()
         for ind, s in data.items():
             ind_split = ind.split('.')
             ind_type = ind_split[0]
@@ -50,30 +42,22 @@ class MetricsAnalysis(Analysis):
                 if ind not in self.metrics.indicators:
                     if len(self.metrics.indicators) >= INDICATOR_LIMIT:
                         continue
-                    self.metrics.indicators.add('.'.join(ind))
-
+                    self.metrics.indicators.add(ind)
+                    new_indicators.add(ind)
                 res[ind] = s
 
-        self.metrics.track(res)
+        return self.metrics.track(res)
 
     def get_tracking(self):
         res = []
-        is_series_updated = False
         for ind, track in self.metrics.tracking.items():
             name = ind.split('.')
 
             s = Series().load(track)
-            series: Dict[str, Any] = s.detail
+            series: Dict[str, Any] = s.to_data()
             series['name'] = '.'.join(name)
 
-            if s.is_smoothed_updated:
-                self.metrics.tracking[ind] = s.to_data()
-                is_series_updated = True
-
             res.append(series)
-
-        if is_series_updated:
-            self.metrics.save()
 
         res.sort(key=lambda s: s['name'])
 
@@ -88,71 +72,48 @@ class MetricsAnalysis(Analysis):
             m.save()
             MetricsIndex.set(run_uuid, m.key)
 
-            mp = MetricsPreferencesModel()
-            mp.save()
-            MetricsPreferencesIndex.set(run_uuid, mp.key)
-
             return MetricsAnalysis(m)
+
+        return MetricsAnalysis(metrics_key.load())
+
+    @staticmethod
+    def get(run_uuid: str) -> Optional['MetricsAnalysis']:
+        metrics_key = MetricsIndex.get(run_uuid)
+
+        if not metrics_key:
+            return None
 
         return MetricsAnalysis(metrics_key.load())
 
     @staticmethod
     def delete(run_uuid: str):
         metrics_key = MetricsIndex.get(run_uuid)
-        preferences_key = MetricsPreferencesIndex.get(run_uuid)
 
         if metrics_key:
             m: MetricsModel = metrics_key.load()
             MetricsIndex.delete(run_uuid)
             m.delete()
 
-        if preferences_key:
-            mp: MetricsPreferencesModel = preferences_key.load()
-            MetricsPreferencesIndex.delete(run_uuid)
-            mp.delete()
 
+def get_metrics_tracking_util(track_data: List[Dict[str, Any]], indicators: List[str]):
+    filtered_track_data = []
+    for track_item in track_data:
+        include_full_data = track_item['name'] in indicators
 
-# @utils.mix_panel.MixPanelEvent.time_this(None)
-@Analysis.route('GET', 'metrics/{run_uuid}')
-async def get_metrics_tracking(request: Request, run_uuid: str) -> Any:
-    track_data = []
-    status_code = 404
+        filtered_track_data.append(track_item)
+        if include_full_data:
+            filtered_track_data[-1]['is_summary'] = False
+        else:
+            filtered_track_data[-1]['value'] = filtered_track_data[-1]['value'][-1:]
+            filtered_track_data[-1]['step'] = filtered_track_data[-1]['step'][-1:]
+            filtered_track_data[-1]['is_summary'] = True
 
-    ans = MetricsAnalysis.get_or_create(run_uuid)
-    if ans:
-        track_data = ans.get_tracking()
-        status_code = 200
+        s = Series()
+        s.update(list(filtered_track_data[-1]['step']), filtered_track_data[-1]['value'])
+        details = s.detail
+        details['is_summary'] = filtered_track_data[-1]['is_summary']
+        details['name'] = filtered_track_data[-1]['name']
 
-    response = JSONResponse({'series': track_data, 'insights': []})
-    response.status_code = status_code
+        filtered_track_data[-1] = details
 
-    return response
-
-
-@Analysis.route('GET', 'metrics/preferences/{run_uuid}')
-async def get_metrics_preferences(request: Request, run_uuid: str) -> Any:
-    preferences_data = {}
-
-    preferences_key = MetricsPreferencesIndex.get(run_uuid)
-    if not preferences_key:
-        return preferences_data
-
-    mp: MetricsPreferencesModel = preferences_key.load()
-
-    return mp.get_data()
-
-
-@Analysis.route('POST', 'metrics/preferences/{run_uuid}')
-async def set_metrics_preferences(request: Request, run_uuid: str) -> Any:
-    preferences_key = MetricsPreferencesIndex.get(run_uuid)
-
-    if not preferences_key:
-        return {}
-
-    mp = preferences_key.load()
-    json = await request.json()
-    mp.update_preferences(json)
-
-    logger.debug(f'update metrics preferences: {mp.key}')
-
-    return {'errors': mp.errors}
+    return filtered_track_data

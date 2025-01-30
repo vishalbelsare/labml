@@ -17,12 +17,3 @@ Configs
     .. autofunction:: meta_config
 
     .. autofunction:: aggregate
-
-    Dynamic Hyper-parameters
-    ------------------------
-
-    .. autoclass:: DynamicHyperParam
-
-    .. autoclass:: FloatDynamicHyperParam
-
-    .. autoclass:: IntDynamicHyperParam

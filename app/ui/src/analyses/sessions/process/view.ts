@@ -1,5 +1,5 @@
-import {ProcessModel} from "./types"
-import CACHE, {AnalysisDataCache, SessionCache, SessionStatusCache} from "../../../cache/cache"
+import {Process} from "./types"
+import CACHE, {ProcessDataCache, SessionCache, SessionStatusCache} from "../../../cache/cache"
 import {Weya as $, WeyaElement} from "../../../../../lib/weya/weya"
 import {Status} from "../../../models/status"
 import {DataLoader} from "../../../components/loader"
@@ -7,7 +7,6 @@ import {ROUTER, SCREEN} from "../../../app"
 import {BackButton} from "../../../components/buttons"
 import {processCache} from "./cache"
 import {SessionHeaderCard} from '../session_header/card'
-import mix_panel from "../../../mix_panel"
 import {AwesomeRefreshButton} from '../../../components/refresh_button'
 import {ProcessList} from "./process_list"
 import {handleNetworkErrorInplace} from '../../../utils/redirect'
@@ -21,8 +20,8 @@ class ProcessView extends ScreenView {
     status: Status
     actualWidth: number
     statusCache: SessionStatusCache
-    series: ProcessModel[]
-    analysisCache: AnalysisDataCache
+    series: Process[]
+    analysisCache: ProcessDataCache
     sessionHeaderCard: SessionHeaderCard
     processListContainer: HTMLDivElement
     private loader: DataLoader
@@ -45,7 +44,6 @@ class ProcessView extends ScreenView {
         })
         this.refresh = new AwesomeRefreshButton(this.onRefresh.bind(this))
 
-        mix_panel.track('Analysis View', {uuid: this.uuid, analysis: this.constructor.name})
     }
 
     get requiresAuth(): boolean {

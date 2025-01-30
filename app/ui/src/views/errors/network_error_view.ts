@@ -1,6 +1,5 @@
 import {ROUTER, SCREEN} from '../../app'
 import {Weya as $} from '../../../../lib/weya/weya'
-import mix_panel from "../../mix_panel"
 import {setTitle} from '../../utils/document'
 import {ScreenView} from '../../screen_view'
 
@@ -20,6 +19,8 @@ function wrapEvent(eventName: string, func: Function) {
 
 class NetworkErrorView extends ScreenView {
     elem: HTMLDivElement
+    error: Error
+
     private events = {
         retry: () => {
             if (ROUTER.canBack()) {
@@ -28,8 +29,9 @@ class NetworkErrorView extends ScreenView {
         },
     }
 
-    constructor() {
+    constructor(error: Error) {
         super()
+        this.error = error
         let events = []
         for (let k in this.events) {
             events.push(k)
@@ -39,8 +41,6 @@ class NetworkErrorView extends ScreenView {
             let func = this.events[k]
             this.events[k] = wrapEvent(k, func)
         }
-
-        mix_panel.track('Network Error View')
     }
 
     get requiresAuth(): boolean {
@@ -51,15 +51,20 @@ class NetworkErrorView extends ScreenView {
         setTitle({section: 'Network Error'})
         this.elem = $('div', '.error-container', $ => {
             $('h2', '.mt-5', 'Ooops!' + '')
-            $('p', 'There\'s a problem with the connection between you and us' + '')
-            $('div', '.btn-container.mt-3', $ => {
-                $('button', '.btn.nav-link',
-                    {on: {click: this.events.retry}},
-                    $ => {
-                        $('span', '.fas.fa-redo', '')
-                        $('span', '.m-1', 'Retry')
-                    })
-            })
+            $('p', 'we\'ve encountered an UI Error ' + '')
+            if (this.error != null) {
+                $('div.code-sample.bg-dark.px-1.py-2.my-3', $ => {
+                    if (this.error.name != null) {
+                    $('pre.text-white', this.error.name)
+                    }
+                    if (this.error.message != null) {
+                        $('pre.text-white', this.error.message)
+                    }
+                    if (this.error.stack != null) {
+                        $('pre.text-white', this.error.stack)
+                    }
+                })
+            }
         })
 
         return this.elem
@@ -74,7 +79,7 @@ export class NetworkErrorHandler {
         ROUTER.route('network_error', [NetworkErrorHandler.handleNetworkError])
     }
 
-    static handleNetworkError = () => {
-        SCREEN.setView(new NetworkErrorView())
+    static handleNetworkError = (error: Error = null) => {
+        SCREEN.setView(new NetworkErrorView(error))
     }
 }

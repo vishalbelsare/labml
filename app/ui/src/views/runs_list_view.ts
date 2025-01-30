@@ -1,65 +1,98 @@
 import {ROUTER, SCREEN} from '../app'
 import {Weya as $, WeyaElement} from '../../../lib/weya/weya'
-import {DataLoader} from "../components/loader"
+import {DataLoader, Loader} from "../components/loader"
 import CACHE, {RunsListCache} from "../cache/cache"
-import {RunListItemModel} from '../models/run_list'
+import {RunListItem, RunListItemModel} from '../models/run_list'
 import {RunsListItemView} from '../components/runs_list_item'
 import {SearchView} from '../components/search'
-import {CancelButton, DeleteButton, EditButton, TensorBoardButton} from '../components/buttons'
+import {CancelButton, DeleteButton, EditButton} from '../components/buttons'
 import {HamburgerMenuView} from '../components/hamburger_menu'
-import mix_panel from "../mix_panel"
 import EmptyRunsList from './empty_runs_list'
 import {UserMessages} from '../components/user_messages'
 import {AwesomeRefreshButton} from '../components/refresh_button'
 import {handleNetworkErrorInplace} from '../utils/redirect'
-import {setTitle} from '../utils/document'
-import {openInNewTab} from "../utils/new_tab"
+import {getQueryParameter, setTitle} from '../utils/document'
 import {ScreenView} from '../screen_view'
+import {DefaultLineGradient} from "../components/charts/chart_gradients"
+import {extractTags, getSearchQuery, runsFilter} from "../utils/search"
 
 class RunsListView extends ScreenView {
     runListCache: RunsListCache
-    currentRunsList: RunListItemModel[]
+    runsList: RunListItem[]
+    currentRunsList: RunListItem[]
     elem: HTMLDivElement
     runsListContainer: HTMLDivElement
     searchQuery: string
+    searchView: SearchView
     buttonContainer: HTMLDivElement
     deleteButton: DeleteButton
-    startTBButton: TensorBoardButton
     editButton: EditButton
     cancelButton: CancelButton
     isEditMode: boolean
     selectedRunsSet: Set<RunListItemModel>
-    private loader: DataLoader
-    private userMessages: UserMessages
+    private dataLoader: DataLoader
+    private loader: Loader
     private refresh: AwesomeRefreshButton
     private isTBProcessing: boolean
+    private actualWidth: number
+    private defaultTag: string // permanent tag in the url
 
-    constructor() {
+    constructor(tag: string) {
         super()
+
+        this.defaultTag = tag
 
         this.runListCache = CACHE.getRunsList()
 
         this.deleteButton = new DeleteButton({onButtonClick: this.onDelete, parent: this.constructor.name})
-        this.startTBButton = new TensorBoardButton({
-            onButtonClick: this.onStartTensorBoard,
-            parent: this.constructor.name
-        })
         this.editButton = new EditButton({onButtonClick: this.onEdit, parent: this.constructor.name})
         this.cancelButton = new CancelButton({onButtonClick: this.onCancel, parent: this.constructor.name})
 
-        this.userMessages = new UserMessages()
 
-        this.loader = new DataLoader(async (force) => {
-            this.currentRunsList = (await this.runListCache.get(force)).runs
+        this.loader = new Loader()
+        this.dataLoader = new DataLoader(async (force) => {
+            let runsList = (await this.runListCache.get(force, this.defaultTag)).runs
+            this.runsList = []
+            for (let run of runsList) {
+                this.runsList.push(new RunListItem(run))
+            }
+            this.currentRunsList = this.runsList.slice()
         })
         this.refresh = new AwesomeRefreshButton(this.onRefresh.bind(this))
 
-        this.searchQuery = ''
+        this.searchQuery = getQueryParameter('query', window.location.search)
+        let tags = getQueryParameter('tags', window.location.search)
+
+        if (this.defaultTag) {
+            this.searchQuery += ` $${this.defaultTag}`
+        }
+        if (tags) {
+            for (let tag of tags.split(',')) {
+                this.searchQuery += ` :${tag}`
+            }
+        }
+
+        if (this.searchQuery === "") {
+            this.searchQuery = getSearchQuery()
+            let r = extractTags(this.searchQuery)
+            this.defaultTag = r.mainTags.length > 0 ? r.mainTags[0] : ""
+        }
+
         this.isEditMode = false
         this.selectedRunsSet = new Set<RunListItemModel>()
         this.isTBProcessing = false
 
-        mix_panel.track('Runs List View')
+        this.searchView = new SearchView({onSearch: this.onSearch, initText: this.searchQuery})
+    }
+
+    onResize(width: number) {
+        super.onResize(width)
+
+        this.actualWidth = Math.min(800, width)
+
+        if (this.elem) {
+            this._render().then()
+        }
     }
 
     async _render() {
@@ -67,36 +100,37 @@ class RunsListView extends ScreenView {
         this.elem.innerHTML = ''
         $(this.elem, $ => {
             $('div', $ => {
-                this.userMessages.render($)
                 new HamburgerMenuView({
                     title: 'Runs',
                     setButtonContainer: container => this.buttonContainer = container
                 }).render($)
 
                 $('div', '.runs-list', $ => {
-                    new SearchView({onSearch: this.onSearch}).render($)
+                    this.searchView.render($)
                     this.loader.render($)
+                    this.loader.hide(true)
+                    this.dataLoader.render($)
+                    $('svg', {style: {height: `${1}px`}}, $ => {
+                        new DefaultLineGradient().render($)
+                    })
                     this.runsListContainer = $('div', '.list.runs-list.list-group', '')
                 })
             })
         })
         $(this.buttonContainer, $ => {
-            this.startTBButton.render($)
             this.deleteButton.render($)
             this.cancelButton.render($)
             this.editButton.render($)
             this.refresh.render($)
             this.deleteButton.hide(true)
-            this.startTBButton.hide(true)
             this.cancelButton.hide(true)
             this.editButton.hide(true)
-            this.startTBButton.isLoading = false
         })
 
         try {
-            await this.loader.load()
+            await this.dataLoader.load()
 
-            this.renderList().then()
+            this.renderList()
         } catch (e) {
             handleNetworkErrorInplace(e)
         }
@@ -117,8 +151,7 @@ class RunsListView extends ScreenView {
     updateButtons() {
         let noRuns = this.currentRunsList.length == 0
 
-        this.deleteButton.hide(noRuns || !this.isEditMode)
-        this.startTBButton.hide(noRuns || !this.isEditMode)
+        this.deleteButton.hide((noRuns || !this.isEditMode))
         this.cancelButton.hide(noRuns || !this.isEditMode)
         this.editButton.hide(noRuns || this.isEditMode)
 
@@ -129,19 +162,12 @@ class RunsListView extends ScreenView {
         }
     }
 
-    runsFilter = (run: RunListItemModel, query: RegExp) => {
-        let name = run.name.toLowerCase()
-        let comment = run.comment.toLowerCase()
-
-        return (name.search(query) !== -1 || comment.search(query) !== -1)
-    }
-
     onRefresh = async () => {
         this.editButton.disabled = true
         try {
-            await this.loader.load(true)
+            await this.dataLoader.load(true)
 
-            await this.renderList()
+            this.renderList()
         } catch (e) {
 
         } finally {
@@ -153,9 +179,8 @@ class RunsListView extends ScreenView {
         let isRunsSelected = this.selectedRunsSet.size === 0
 
         this.isEditMode = true
+        this.refresh.disabled = true
         this.deleteButton.disabled = isRunsSelected
-        this.startTBButton.disabled = isRunsSelected || this.isTBProcessing
-        this.startTBButton.isLoading = this.isTBProcessing
         this.updateButtons()
     }
 
@@ -172,67 +197,24 @@ class RunsListView extends ScreenView {
             this.selectedRunsSet.clear()
             this.deleteButton.disabled = this.selectedRunsSet.size === 0
 
-            await this.loader.load()
-            await this.renderList()
+            await this.dataLoader.load()
+
+
         } catch (e) {
-            this.userMessages.networkError()
-        }
-    }
-
-    onStartTensorBoard = async () => {
-        this.userMessages.hide(true)
-        this.updateTBButtonState(true)
-
-        let computerUUID: string = ''
-        let runUUIDs: Array<string> = []
-
-        for (let run of this.selectedRunsSet) {
-            if (!computerUUID) {
-                computerUUID = run.computer_uuid
-            }
-
-            if (computerUUID !== run.computer_uuid) {
-                this.userMessages.warning('All the selected runs should be from a single computer')
-                this.updateTBButtonState(false)
-            } else {
-                runUUIDs.push(run.run_uuid)
-            }
+            UserMessages.shared.networkError(e, 'Failed to delete runs')
+            return
+        } finally {
+            this.refresh.disabled = false
         }
 
-        if (!computerUUID) {
-            this.userMessages.warning('Selected runs do not belong to any computer')
-            this.updateTBButtonState(false)
-        }
-
-        try {
-            let job = await this.runListCache.startTensorBoard(computerUUID, runUUIDs)
-            let url = job.data['url']
-
-            if (job.isSuccessful && url) {
-                let message = job.data['message']
-                this.userMessages.success(message)
-                openInNewTab(url, this.userMessages)
-            } else if (job.isComputerOffline) {
-                this.userMessages.warning('Your computer is currently offline')
-            } else if (job.isFailed) {
-                let message = job.data['message']
-                this.userMessages.warning(`Failed to start TensorBoard: ${message}`)
-            } else if (job.isTimeOut) {
-                this.userMessages.warning(`Timeout occurred while starting TensorBoard`)
-            } else {
-                this.userMessages.warning('Error occurred while starting TensorBoard')
-            }
-        } catch (e) {
-            this.userMessages.networkError()
-        }
-
-        this.updateTBButtonState(false)
+        this.renderList()
     }
 
     onCancel = () => {
         this.isEditMode = false
+        this.refresh.disabled = false
         this.selectedRunsSet.clear()
-        this.renderList().then()
+        this.renderList()
     }
 
     onItemClicked = (elem: RunsListItemView) => {
@@ -254,31 +236,48 @@ class RunsListView extends ScreenView {
         let isRunsSelected = this.selectedRunsSet.size === 0
 
         this.deleteButton.disabled = isRunsSelected || this.isTBProcessing
-        this.startTBButton.disabled = isRunsSelected || this.isTBProcessing
     }
 
     onSearch = async (query: string) => {
+        this.loader.hide(false)
+        this.searchView.disable(true)
+        this.runsListContainer.innerHTML = ''
+
         this.searchQuery = query
-        await this.loader.load()
-        this.renderList().then()
+        let r = extractTags(query)
+
+        let mainTag = r.mainTags.length > 0 ? r.mainTags[0] : ""
+        let tags = r.tags.concat(r.mainTags).filter(tag => tag !== mainTag)
+
+        let queryString = (r.query == "" ? "" : `query=${encodeURIComponent(r.query)}`)
+        let tagsString = (tags.length == 0 ? "" : `tags=${encodeURIComponent(tags.join(','))}`)
+        if (queryString && tagsString) {
+            queryString += "&"
+        }
+        window.history.replaceState({}, "", `/runs${mainTag ? "/" + mainTag : ""}${queryString || tagsString ? "?" : ""}${queryString}${tagsString}`)
+
+        this.defaultTag = mainTag
+        await this.dataLoader.load()
+
+        this.renderList()
+
+        this.loader.hide(true)
+        this.searchView.disable(false)
+        this.searchView.focus()
     }
 
-    private updateTBButtonState(isLoading: boolean) {
-        this.isTBProcessing = isLoading
-        let isRunsDeselected = this.selectedRunsSet.size === 0
-        this.startTBButton.disabled = isRunsDeselected || this.isTBProcessing
-        this.startTBButton.isLoading = this.isTBProcessing
-    }
-
-    private async renderList() {
-        if (this.currentRunsList.length > 0) {
-            let re = new RegExp(this.searchQuery.toLowerCase(), 'g')
-            this.currentRunsList = this.currentRunsList.filter(run => this.runsFilter(run, re))
+    private renderList() {
+        if (this.runsList.length > 0) {
+            this.currentRunsList = this.runsList.filter(run => runsFilter(run, this.searchQuery))
 
             this.runsListContainer.innerHTML = ''
             $(this.runsListContainer, $ => {
                 for (let i = 0; i < this.currentRunsList.length; i++) {
-                    new RunsListItemView({item: this.currentRunsList[i], onClick: this.onItemClicked}).render($)
+                    new RunsListItemView({
+                        item: this.currentRunsList[i],
+                        onClick: this.onItemClicked,
+                        width: this.actualWidth
+                    }).render($)
                 }
             })
         } else {
@@ -294,9 +293,14 @@ class RunsListView extends ScreenView {
 export class RunsListHandler {
     constructor() {
         ROUTER.route('runs', [this.handleRunsList])
+        ROUTER.route('runs/:tag', [this.handleTag])
+    }
+
+    handleTag = (tag: string) => {
+        SCREEN.setView(new RunsListView(tag))
     }
 
     handleRunsList = () => {
-        SCREEN.setView(new RunsListView())
+        SCREEN.setView(new RunsListView(""))
     }
 }

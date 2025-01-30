@@ -1,14 +1,45 @@
-from pathlib import PurePath, Path
-from typing import List, Optional, Dict
+from copy import deepcopy
+from pathlib import Path
+from typing import Optional, Dict
 
-from labml.internal import util
-from labml.internal.api.configs import WebAPIConfigs
-from labml.internal.util import is_colab, is_kaggle
 from labml.logger import Text
 from labml.utils import get_caller_file
 from labml.utils.notice import labml_notice
+from . import util
+from .app.configs import AppTrackConfigs
+from .util import is_colab, is_kaggle
 
 _CONFIG_FILE_NAME = '.labml.yaml'
+
+
+def get_app_url_for_handle(handle: str, *, base_url=None):
+    if base_url is None:
+        import os
+        if 'labml_app_url' in os.environ:
+            base_url = os.environ['labml_app_url']
+
+    if base_url is None:
+        return None
+
+    base_url = base_url.strip()
+    if not base_url:
+        return None
+
+    if not base_url.startswith('http'):
+        raise RuntimeError(f'app_url should be a valid URL: {base_url}')
+    if '?' in base_url:
+        raise RuntimeError(f'app_url should be a valid URL '
+                           f'that does contain any url parameters or \'?\': {base_url}')
+
+    if not base_url.endswith('/'):
+        base_url += '/'
+
+    if not handle:
+        return f'{base_url}'
+    else:
+        return f'{base_url}{handle}?'
+
+    # return 'https://domain/api/v1/token/track?'
 
 
 class LabYamlNotfoundError(RuntimeError):
@@ -25,7 +56,8 @@ class Lab:
     data_path: Optional[Path]
     check_repo_dirty: Optional[bool]
     path: Optional[Path]
-    web_api: Optional[WebAPIConfigs]
+    app_configs: Optional[AppTrackConfigs]
+    configs: Dict
 
     def __init__(self, path: Optional[Path] = None):
         self.indicators = {}
@@ -33,7 +65,7 @@ class Lab:
         self.check_repo_dirty = None
         self.data_path = None
         self.experiments = None
-        self.web_api = None
+        self.app_configs = None
         self.configs = self.__default_config()
         self.custom_configs = []
         self.__update_configs()
@@ -44,6 +76,12 @@ class Lab:
             path = Path(path).resolve()
 
         self.__load_configs(path)
+
+    def get_info(self):
+        return {
+            'current_path': self.__current_path,
+            'configs': deepcopy(self.configs),
+        }
 
     def set_path(self, path: str):
         self.__load_configs(Path(path).resolve())
@@ -87,22 +125,15 @@ class Lab:
 
         self.check_repo_dirty = self.configs['check_repo_dirty']
         self.indicators = self.configs['indicators']
-        if self.configs['web_api']:
-            web_api_url = self.configs['web_api']
-            if web_api_url[0:4] != 'http':
-                web_api_url = f"https://api.labml.ai/api/v1/track?labml_token={web_api_url}&"
-            is_default = web_api_url == self.__default_config()['web_api']
-            # if is_default:
-            #     from labml.internal.computer.configs import computer_singleton
-            #     if not computer_singleton().web_api.is_default:
-            #         web_api_url = computer_singleton().web_api.url
-            self.web_api = WebAPIConfigs(url=web_api_url,
-                                         frequency=self.configs['web_api_frequency'],
-                                         verify_connection=self.configs['web_api_verify_connection'],
-                                         open_browser=self.configs['web_api_open_browser'],
-                                         is_default=is_default)
+        app_track_url = get_app_url_for_handle('track', base_url=self.configs['app_url'])
+
+        if app_track_url:
+            self.app_configs = AppTrackConfigs(url=app_track_url,
+                                               frequency=self.configs['app_track_frequency'],
+                                               open_browser=self.configs['app_open_browser'],
+                                               is_default=False)
         else:
-            self.web_api = None
+            self.app_configs = None
 
     def set_configurations(self, configs: Dict[str, any]):
         self.custom_configs.append(configs)
@@ -126,10 +157,9 @@ class Lab:
             experiments_path='logs',
             analytics_path='analytics',
             analytics_templates={},
-            web_api='https://api.labml.ai/api/v1/track?',
-            web_api_frequency=0,
-            web_api_verify_connection=True,
-            web_api_open_browser=True,
+            app_url=None,
+            app_track_frequency=0,
+            app_open_browser=True,
             indicators=[
                 {
                     'class_name': 'Scalar',

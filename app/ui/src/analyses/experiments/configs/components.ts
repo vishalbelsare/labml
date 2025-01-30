@@ -1,11 +1,18 @@
 import {FormattedValue} from "../../../utils/value"
 import {Config} from "../../../models/config"
 import {WeyaElement, WeyaElementFunction} from "../../../../../lib/weya/weya"
+import {ControlledToggleButton} from "../../../components/buttons";
 
 
 export const CONFIG_PRINT_LEN = 20
 export const KEY_WIDTH = 125
 export const PADDING = 11
+
+export enum ConfigStatus {
+    SELECTED = 'selected',
+    FAVOURITE = 'favourite',
+    NONE = 'none'
+}
 
 export class ComputedValue {
     computed: any
@@ -27,17 +34,8 @@ export class ComputedValue {
             $('span.computed', this.computed)
             return
         }
-
-        let truncated = this.computed.substr(0, CONFIG_PRINT_LEN) + '...'
-        let split = this.computed.split('.')
-        if (this.computed.indexOf(' ') === -1 && split.length > 1) {
-            truncated = '...' + split[split.length - 1]
-            if (truncated.length > CONFIG_PRINT_LEN) {
-                truncated = truncated.substr(0, CONFIG_PRINT_LEN) + '...'
-            }
-        }
         $('span.computed', $ => {
-            $('span.empty', truncated, {title: this.computed})
+            $('span.empty', this.computed, {title: this.computed})
         })
     }
 }
@@ -77,18 +75,23 @@ class OtherOptions {
 interface ConfigItemOptions {
     config: Config
     configs: Config[]
-    isHyperParamOnly: boolean
+    isSummary: boolean
     width: number
+    onTap?: (key: string, configStatus: ConfigStatus) => void
 }
 
-class ConfigItemView {
+export class ConfigItemView {
     conf: Config
-    isHyperParamOnly: boolean
     isParentDefault: boolean
     classes: string[]
     key: string
     width: number
     elem: WeyaElement
+    onTap?: (key: string, configStatus: ConfigStatus) => void
+    isSummary: boolean
+
+    private selectToggle: ControlledToggleButton
+    private favouriteToggle: ControlledToggleButton
 
     constructor(opt: ConfigItemOptions) {
         this.conf = opt.config
@@ -97,7 +100,7 @@ class ConfigItemView {
             configs[c.key] = c
         }
         this.width = opt.width
-        this.isHyperParamOnly = opt.isHyperParamOnly
+        this.onTap = opt.onTap
 
         this.classes = ['info_list', 'config']
 
@@ -115,32 +118,80 @@ class ConfigItemView {
         }
 
         this.key = prefix + this.conf.name
-        if (opt.isHyperParamOnly) {
+        this.isSummary = opt.isSummary
+        if (opt.isSummary) {
             this.key = this.conf.key
         }
+
+        this.selectToggle = new ControlledToggleButton({
+            icon: ".fas.fa-eye", parent: this.constructor.name, text: "",
+            isToggled: this.conf.isSelected,
+            onButtonClick: () => {
+                this.onTapHandler(ConfigStatus.SELECTED)
+            }
+        })
+        this.favouriteToggle = new ControlledToggleButton({
+            icon: ".fas.fa-star", parent: this.constructor.name, text: "",
+            isToggled: this.conf.isFavourite,
+            onButtonClick: () => {
+                this.onTapHandler(ConfigStatus.FAVOURITE)
+            }
+        })
+    }
+
+    private onTapHandler(configStatus: ConfigStatus): void {
+        if (this.onTap == null) {
+            return
+        }
+        if (configStatus === ConfigStatus.FAVOURITE) {
+            if (this.conf.isFavourite) {
+                this.conf.isFavourite = false
+            } else {
+                this.conf.isFavourite = true
+                this.conf.isSelected = true
+            }
+        } else if (configStatus === ConfigStatus.SELECTED) {
+            if (this.conf.isSelected) {
+                this.conf.isSelected = false
+                this.conf.isFavourite = false
+            } else {
+                this.conf.isSelected = true
+            }
+        }
+
+        this.updateButtons()
+
+        let newConfigStatus: ConfigStatus = ConfigStatus.NONE
+        if (this.conf.isSelected) {
+            newConfigStatus = ConfigStatus.SELECTED
+        }
+        if (this.conf.isFavourite) {
+            newConfigStatus = ConfigStatus.FAVOURITE
+        }
+        this.onTap(this.conf.key, newConfigStatus)
+    }
+
+    private updateButtons() {
+        this.selectToggle.toggle = this.conf.isSelected
+        this.favouriteToggle.toggle = this.conf.isFavourite
     }
 
     render($: WeyaElementFunction) {
         if (this.conf.order < 0) {
             this.classes.push('ignored')
-            if (this.isHyperParamOnly) {
-                return
-            }
         }
 
         if (this.conf.isMeta) {
             return
         }
 
-        if (!this.conf.isExplicitlySpecified && !this.conf.isHyperparam) {
-            if (this.isHyperParamOnly) {
-                return
+        this.elem = $('div',  $ => {
+            if (!this.isSummary) {
+                this.selectToggle.render($)
+                this.favouriteToggle.render($)
             }
-        }
-
-        this.elem = $('div', $ => {
             $('span.key', this.key)
-            $('span.combined', {style: {width: `${this.width - KEY_WIDTH - 2 * PADDING}px`}}, $ => {
+            $('span.combined', $ => {
                 new ComputedValue({computed: this.conf.computed}).render($)
 
                 if (this.conf.isCustom) {
@@ -159,7 +210,7 @@ class ConfigItemView {
                     }
                 }
 
-                if (!this.isHyperParamOnly && this.conf.otherOptions) {
+                if (!this.isSummary && this.conf.otherOptions) {
                     new OtherOptions({options: [...this.conf.otherOptions]}).render($)
                 }
 
@@ -176,25 +227,29 @@ class ConfigItemView {
         for (let cls of this.classes) {
             this.elem.classList.add(cls)
         }
+
+        this.updateButtons()
     }
 }
 
 interface ConfigsOptions {
     configs: Config[]
-    isHyperParamOnly: boolean
+    isSummary: boolean
     width: number
+    onTap?: (key: string, configStatus: ConfigStatus) => void
 }
 
 export class Configs {
     configs: Config[]
-    isHyperParamOnly: boolean
+    isSummary: boolean
     width: number
-    count: number
+    onTap?: (key: string, configStatus: ConfigStatus)=>void
 
     constructor(opt: ConfigsOptions) {
         this.configs = opt.configs
-        this.isHyperParamOnly = opt.isHyperParamOnly
+        this.isSummary = opt.isSummary
         this.width = opt.width
+        this.onTap = opt.onTap
 
         this.configs.sort((a, b) => {
             if (a.key < b.key) return -1;
@@ -202,18 +257,25 @@ export class Configs {
             else return 0
         })
 
-        this.count = this.configs.length
-        if (opt.isHyperParamOnly) {
-            this.count = this.configs.filter((c) => {
-                return !(c.order < 0 ||
-                    (!c.isExplicitlySpecified && !c.isHyperparam))
-            }).length
+        if (opt.isSummary) {
+            this.configs = this.configs.filter((c) => {  // show selected configs
+                return c.isSelected
+            })
+
+            if (this.configs.length == 0) {  // show hyper params only as default
+                if (opt.isSummary) {
+                    this.configs = this.configs.filter((c) => {
+                        return !(c.order < 0 ||
+                            (!c.isExplicitlySpecified && !c.isHyperparam))
+                    })
+                }
+            }
         }
     }
 
     render($: WeyaElementFunction) {
         $('div','.configs.block.collapsed', {style: {width: `${this.width}px`}}, $ => {
-            if (this.count === 0 && this.isHyperParamOnly) {
+            if (this.configs.length === 0 && this.isSummary) {
                 $('div','.info', 'Default configurations')
                 return
             }
@@ -223,7 +285,8 @@ export class Configs {
                     config: c,
                     configs: this.configs,
                     width: this.width,
-                    isHyperParamOnly: this.isHyperParamOnly
+                    onTap: this.onTap,
+                    isSummary: this.isSummary
                 }).render($)
             )
         })

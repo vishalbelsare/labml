@@ -1,12 +1,17 @@
-import CACHE, {AnalysisDataCache, AnalysisPreferenceCache, RunStatusCache, SessionStatusCache} from "../cache/cache"
+import CACHE, {
+    AnalysisPreferenceCache, BaseDataCache,
+    ComparisonAnalysisPreferenceCache, LogCache,
+    RunStatusCache,
+    SessionStatusCache
+} from "../cache/cache"
 import {ContentType} from '../types'
 
-export class AnalysisCache<TA extends AnalysisDataCache, TAP extends AnalysisPreferenceCache> {
+export class AnalysisCache<TA extends BaseDataCache<any>, TAP extends AnalysisPreferenceCache | ComparisonAnalysisPreferenceCache> {
     private readonly type: ContentType
     private readonly series: new (uuid: string, status: RunStatusCache | SessionStatusCache) => TA
-    private readonly seriesCaches: { [uuid: string]: AnalysisDataCache }
+    private readonly seriesCaches: { [uuid: string]: TA }
     private readonly preferences: new (uuid: string) => TAP
-    private readonly preferencesCaches: { [uuid: string]: AnalysisPreferenceCache }
+    private readonly preferencesCaches: { [uuid: string]: AnalysisPreferenceCache | ComparisonAnalysisPreferenceCache }
 
     constructor(type: ContentType, series: new (uuid: string, status: RunStatusCache | SessionStatusCache) => TA, preferences: new (uuid: string) => TAP) {
         this.type = type
@@ -40,5 +45,23 @@ export class AnalysisCache<TA extends AnalysisDataCache, TAP extends AnalysisPre
         }
 
         return null
+    }
+}
+
+export class LogAnalysisCache<TA extends LogCache> {
+    private readonly logCaches: { [uuid: string]: TA }
+    private readonly logs: new (uuid: string) => TA
+
+    constructor(logs: new (uuid: string) => TA){
+        this.logCaches = {}
+        this.logs = logs
+    }
+
+    getLogCache(uuid: string) {
+        if (this.logCaches[uuid] == null) {
+            this.logCaches[uuid] = new this.logs(uuid)
+        }
+
+        return this.logCaches[uuid]
     }
 }

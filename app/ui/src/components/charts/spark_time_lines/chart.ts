@@ -1,11 +1,11 @@
 import {WeyaElementFunction} from '../../../../../lib/weya/weya'
 import {ChartOptions} from '../types'
-import {SeriesModel} from "../../../models/run"
 import {getExtent, toDate} from "../utils"
 import {SparkTimeLine} from "./spark_time_line"
 import ChartColors from "../chart_colors"
 import {DefaultLineGradient} from "../chart_gradients"
 import {getBaseColor} from '../constants'
+import {Indicator} from "../../../models/run"
 
 
 interface SparkTimeLinesOptions extends ChartOptions {
@@ -16,7 +16,7 @@ interface SparkTimeLinesOptions extends ChartOptions {
 }
 
 export class SparkTimeLines {
-    series: SeriesModel[]
+    series: Indicator[]
     plotIdx: number[]
     rowWidth: number
     minLastValue: number
@@ -68,10 +68,10 @@ export class SparkTimeLines {
 
     render($: WeyaElementFunction) {
         $('div.sparkline-list.list-group', $ => {
+            $('svg', {style: {height: `${1}px`}}, $ => {
+                new DefaultLineGradient().render($)
+            })
             this.series.map((s, i) => {
-                $('svg', {style: {height: `${1}px`}}, $ => {
-                    new DefaultLineGradient().render($)
-                })
                 let onClick
                 if (this.onSelect != null) {
                     onClick = this.onSelect.bind(null, i)

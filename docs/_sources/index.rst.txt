@@ -10,26 +10,29 @@
 
     <p></p>
 
-labml.ai client reference
-=========================
+labml library reference
+=======================
 
-This is the Python API reference.
+This is the Python API & CLI reference.
 Visit the `Github Repo <https://github.com/labmlai/labml>`_ for an overview
 and tutorials.
 
 .. toctree::
    :maxdepth: 1
+   :caption: API
 
    api/experiment
    api/tracker
    api/framework_integrations
    api/monit
-   api/analytics
    api/configs
    api/logger
    api/lab
    api/manage
    api/utils
-   api/helpers
 
+.. toctree::
+   :maxdepth: 1
+   :caption: CLI
 
+   cli/labml

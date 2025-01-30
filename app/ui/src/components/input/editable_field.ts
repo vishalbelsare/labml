@@ -1,11 +1,15 @@
 import {WeyaElementFunction} from '../../../../lib/weya/weya'
 
-interface EditableFieldOptions {
+export interface EditableFieldOptions {
     name: string
     value: any
     placeholder?: string
     isEditable?: boolean
     numEditRows?: number
+    type?: string
+    autocomplete?: string
+    required?: boolean
+    onChange?: (value: string) => void
 }
 
 export default class EditableField {
@@ -16,6 +20,10 @@ export default class EditableField {
     numEditRows: number
     inputElem: HTMLInputElement | HTMLTextAreaElement
     valueElem: HTMLSpanElement
+    protected type: string
+    protected readonly autocomplete?: string
+    protected readonly required: boolean
+    protected readonly onChange?: (value: string) => void
 
     constructor(opt: EditableFieldOptions) {
         this.name = opt.name
@@ -23,6 +31,17 @@ export default class EditableField {
         this.placeholder = opt.placeholder
         this.isEditable = opt.isEditable
         this.numEditRows = opt.numEditRows
+        this.type = opt.type
+        this.autocomplete = opt.autocomplete
+        this.required = opt.required ?? false
+        this.onChange = opt.onChange
+    }
+
+    protected _disabled: boolean
+
+    set disabled(value: boolean) {
+        this._disabled = value
+        this.inputElem.disabled = value
     }
 
     getInput() {
@@ -31,6 +50,10 @@ export default class EditableField {
 
     updateValue(value: string) {
         this.valueElem.textContent = value
+    }
+
+    updateInput(value: string) {
+        this.inputElem.value = value
     }
 
     render($: WeyaElementFunction) {
@@ -43,16 +66,32 @@ export default class EditableField {
                             this.inputElem = <HTMLTextAreaElement>$('textarea', {
                                     rows: this.numEditRows,
                                     placeholder: this.placeholder,
-                                    value: this.value
+                                    autocomplete: this.autocomplete,
+                                    type: this.type
                                 }
                             )
+                            this.inputElem.innerHTML = this.value.split('\n').join('&#013;')
+                            this.inputElem.addEventListener('input', (event: KeyboardEvent) => {
+                                if (this.onChange) {
+                                    this.onChange(this.inputElem.value)
+                                }
+                            })
                         } else {
                             this.inputElem = <HTMLInputElement>$('input', {
                                     placeholder: this.placeholder,
-                                    value: this.value
+                                    value: this.value,
+                                    type: this.type,
+                                    autocomplete: this.autocomplete,
                                 }
                             )
+                            this.inputElem.addEventListener('input', (event: KeyboardEvent) => {
+                                if (this.onChange) {
+                                    this.onChange(this.inputElem.value)
+                                }
+                            })
                         }
+                        this.inputElem.required = this.required
+                        this.inputElem.disabled = this._disabled
                     })
                 })
             } else {

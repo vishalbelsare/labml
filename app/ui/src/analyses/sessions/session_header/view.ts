@@ -1,21 +1,21 @@
 import {Weya as $, WeyaElement} from "../../../../../lib/weya/weya"
 import {ROUTER, SCREEN} from "../../../app"
 import {Run} from "../../../models/run"
-import CACHE, {IsUserLoggedCache, SessionCache, SessionsListCache, SessionStatusCache} from "../../../cache/cache"
+import CACHE, {SessionCache, SessionsListCache, SessionStatusCache, UserCache} from "../../../cache/cache"
 import {Status} from "../../../models/status"
 import {BackButton, CancelButton, DeleteButton, EditButton, SaveButton} from "../../../components/buttons"
 import EditableField from "../../../components/input/editable_field"
 import {formatTime, getTimeDiff} from "../../../utils/time"
 import {DataLoader} from "../../../components/loader"
 import {StatusView} from "../../../components/status"
-import mix_panel from "../../../mix_panel"
-import {IsUserLogged} from '../../../models/user'
 import {handleNetworkError, handleNetworkErrorInplace} from '../../../utils/redirect'
 import {Session} from "../../../models/session"
-import {setTitle} from '../../../utils/document'
+import {getPath, setTitle} from '../../../utils/document'
 import {SessionsListItemModel} from "../../../models/session_list"
 import {SessionsListItemView} from "../../../components/sessions_list_item"
 import {ScreenView} from '../../../screen_view'
+import {User} from '../../../models/user'
+import {UserMessages} from "../../../components/user_messages"
 
 class SessionHeaderView extends ScreenView {
     elem: HTMLDivElement
@@ -26,8 +26,8 @@ class SessionHeaderView extends ScreenView {
     sessionsListContainer: HTMLDivElement
     status: Status
     statusCache: SessionStatusCache
-    isUserLogged: IsUserLogged
-    isUserLoggedCache: IsUserLoggedCache
+    user: User
+    userCache: UserCache
     isEditMode: boolean
     uuid: string
     actualWidth: number
@@ -42,7 +42,7 @@ class SessionHeaderView extends ScreenView {
         this.uuid = uuid
         this.sessionCache = CACHE.getSession(this.uuid)
         this.statusCache = CACHE.getSessionStatus(this.uuid)
-        this.isUserLoggedCache = CACHE.getIsUserLogged()
+        this.userCache = CACHE.getUser()
         this.sessionListCache = CACHE.getSessionsList()
         this.isEditMode = false
 
@@ -51,23 +51,21 @@ class SessionHeaderView extends ScreenView {
         this.loader = new DataLoader(async (force) => {
             this.status = await this.statusCache.get(force)
             this.session = await this.sessionCache.get(force)
-            this.isUserLogged = await this.isUserLoggedCache.get(force)
+            this.user = await this.userCache.get(force)
 
-            if (this.isUserLogged.is_user_logged) {
+            if (this.user.is_complete) {
                 let sessionsList = (await this.sessionListCache.get(force)).sessions
                 this.sessionsList = sessionsList.filter(session => this.sessionsFilter(session))
             }
         })
-
-        mix_panel.track('Analysis View', {uuid: this.uuid, analysis: this.constructor.name})
-    }
-
-    sessionsFilter = (session: SessionsListItemModel) => {
-        return session.computer_uuid === this.session.computer_uuid && session.session_uuid !== this.session.session_uuid
     }
 
     get requiresAuth(): boolean {
         return false
+    }
+
+    sessionsFilter = (session: SessionsListItemModel) => {
+        return session.computer_uuid === this.session.computer_uuid && session.session_uuid !== this.session.session_uuid
     }
 
     onResize(width: number) {
@@ -179,7 +177,7 @@ class SessionHeaderView extends ScreenView {
                 }).render($)
             })
         })
-        this.deleteButton.hide(!(this.isUserLogged.is_user_logged && this.session.is_claimed))
+        this.deleteButton.hide(!(this.user.is_complete && this.session.is_claimed))
     }
 
     onItemClicked = (elem: SessionsListItemView) => {
@@ -193,6 +191,15 @@ class SessionHeaderView extends ScreenView {
     renderSessionsList() {
         this.sessionsListContainer.innerHTML = ''
         $(this.sessionsListContainer, $ => {
+            if (!this.user.is_complete) {
+                $('div', '.text-center', $ => {
+                    $('span', 'You need to be authenticated to view this content. ')
+                    let linkElem = $('a', '.generic-link', {href: '/auth/sign_in', on: {click: this.handleSignIn}})
+                    linkElem.textContent = 'Sign In'
+                })
+
+                return
+            }
             for (let i = 0; i < this.sessionsList.length; i++) {
                 new SessionsListItemView({
                     item: this.sessionsList[i],
@@ -212,11 +219,11 @@ class SessionHeaderView extends ScreenView {
         if (confirm("Are you sure?")) {
             try {
                 await CACHE.getSessionsList().deleteSessions(new Set<string>([this.uuid]))
+                ROUTER.navigate('/computers')
             } catch (e) {
-                handleNetworkError(e)
+                UserMessages.shared.networkError(e, "Failed to delete session")
                 return
             }
-            ROUTER.navigate('/computers')
         }
     }
 
@@ -231,6 +238,11 @@ class SessionHeaderView extends ScreenView {
 
         this.sessionCache.setSession(this.session).then()
         this.onToggleEdit()
+    }
+
+    private handleSignIn(e: Event) {
+        e.preventDefault()
+        ROUTER.navigate(`/auth/sign_in?return_url=${encodeURIComponent(getPath())}`, {replace: true})
     }
 }
 

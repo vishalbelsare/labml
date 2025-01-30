@@ -1,175 +1,287 @@
-import {API_BASE_URL, APP_BASE_URL, AUTH0_CLIENT_ID, AUTH0_DOMAIN, MOBILE_APP_NAMESPACE} from './env'
+import {API_BASE_URL} from './env'
 import {User} from './models/user'
+import {UserMessages} from "./components/user_messages";
+
+export function getAppToken() {
+    return localStorage.getItem('app_token')
+}
+
+export function setAppToken(newToken: string) {
+    localStorage.setItem('app_token', newToken)
+}
 
 class Network {
     baseURL: string
+    private sessionToken?: string
 
     constructor(baseURL: string) {
         this.baseURL = baseURL
+
+        window.addEventListener('online', () => {
+            console.log('Became online')
+            UserMessages.shared.success("Back online.")
+        });
+        window.addEventListener('offline', () => {
+            console.log('Became offline')
+            UserMessages.shared.warning("No internet connection.", false)
+        });
+    }
+
+    async getDataStore(runUUID: string): Promise<any> {
+        return this.sendHttpRequest('GET', `/datastore/${runUUID}`)['promise']
+    }
+
+    async setDataStore(runUUID: string, data: object): Promise<any> {
+        return this.sendHttpRequest('POST', `/datastore/${runUUID}`, data)['promise']
     }
 
     async getRun(runUUID: string): Promise<any> {
-        return this.sendHttpRequest('GET', `/run/${runUUID}`)
+        return this.sendHttpRequest('GET', `/run/${runUUID}`)['promise']
     }
 
-    async setRun(runUUID: string, data: object): Promise<any> {
-        return this.sendHttpRequest('POST', `/run/${runUUID}`, data)
+    async updateRunData(runUUID: string, data: object): Promise<any> {
+        return this.sendHttpRequest('POST', `/run/${runUUID}`, data)['promise']
     }
 
     async addRun(runUUID: string): Promise<any> {
-        return this.sendHttpRequest('PUT', `/run/${runUUID}/add`)
+        return this.sendHttpRequest('PUT', `/run/${runUUID}/add`)['promise']
     }
 
     async claimRun(runUUID: string): Promise<any> {
-        return this.sendHttpRequest('PUT', `/run/${runUUID}/claim`)
+        return this.sendHttpRequest('PUT', `/run/${runUUID}/claim`)['promise']
     }
 
     async getSession(sessionUUID: string): Promise<any> {
-        return this.sendHttpRequest('GET', `/session/${sessionUUID}`)
+        return this.sendHttpRequest('GET', `/session/${sessionUUID}`)['promise']
     }
 
     async setSession(runUUID: string, data: object): Promise<any> {
-        return this.sendHttpRequest('POST', `/session/${runUUID}`, data)
+        return this.sendHttpRequest('POST', `/session/${runUUID}`, data)['promise']
     }
 
     async addSession(sessionUUID: string): Promise<any> {
-        return this.sendHttpRequest('PUT', `/session/${sessionUUID}/add`)
+        return this.sendHttpRequest('PUT', `/session/${sessionUUID}/add`)['promise']
     }
 
     async claimSession(sessionUUID: string): Promise<any> {
-        return this.sendHttpRequest('PUT', `/session/${sessionUUID}/claim`)
+        return this.sendHttpRequest('PUT', `/session/${sessionUUID}/claim`)['promise']
     }
 
     async getRunStatus(runUUID: string): Promise<any> {
-        return this.sendHttpRequest('GET', `/run/status/${runUUID}`)
+        return this.sendHttpRequest('GET', `/run/status/${runUUID}`)['promise']
     }
 
     async getSessionStatus(sessionUUId: string): Promise<any> {
-        return this.sendHttpRequest('GET', `/session/status/${sessionUUId}`)
+        return this.sendHttpRequest('GET', `/session/status/${sessionUUId}`)['promise']
     }
 
-    async getRuns(labml_token: string | null): Promise<any> {
-        return this.sendHttpRequest('GET', `/runs/${labml_token}`)
+    async getRuns(tag: string): Promise<any> {
+        return this.sendHttpRequest('GET', `/runs/${null}${tag ? `/${tag}` : ""}`)['promise']
     }
 
     async getSessions(): Promise<any> {
-        return this.sendHttpRequest('GET', `/sessions/${null}`)
+        return this.sendHttpRequest('GET', `/sessions/${null}`)['promise']
+    }
+
+    async archiveRuns(runUUIDS: string[]): Promise<any> {
+        return this.sendHttpRequest('POST', `/runs/archive`, {'run_uuids': runUUIDS})['promise']
+    }
+
+    async unarchiveRuns(runUUIDS: string[]): Promise<any> {
+        return this.sendHttpRequest('POST', `/runs/unarchive`, {'run_uuids': runUUIDS})['promise']
     }
 
     async deleteRuns(runUUIDS: string[]): Promise<any> {
-        return this.sendHttpRequest('PUT', `/runs`, {'run_uuids': runUUIDS})
+        return this.sendHttpRequest('PUT', `/runs`, {'run_uuids': runUUIDS})['promise']
     }
 
     async deleteSessions(sessionUUIDS: string[]): Promise<any> {
-        return this.sendHttpRequest('PUT', `/sessions`, {'session_uuids': sessionUUIDS})
+        return this.sendHttpRequest('PUT', `/sessions`, {'session_uuids': sessionUUIDS})['promise']
     }
 
     async getUser(): Promise<any> {
-        return this.sendHttpRequest('GET', `/user`, {})
+        let res = await this.sendHttpRequest('POST', `/auth/user`, {
+            device: {
+                userAgent: navigator.userAgent,
+                platform: navigator.platform,
+                appName: navigator.appName,
+                appCodeName: navigator.appCodeName,
+                engine: navigator.product,
+                appVersion: navigator.appVersion,
+                height: window.screen.height,
+                width: window.screen.width
+            },
+            referrer: window.document.referrer,
+
+        }, false)['promise']
+        if (res != null && res.user != null && res.user.token != null) {
+            setAppToken(res.user.token)
+        }
+        return res
     }
 
     async setUser(user: User): Promise<any> {
-        return this.sendHttpRequest('POST', `/user`, {'user': user})
+        return this.sendHttpRequest('POST', `/user`, {'user': user})['promise']
     }
 
-    async signIn(token: string): Promise<any> {
-        let data = {token: token}
-
-        return this.sendHttpRequest('POST', `/auth/sign_in`, data)
-    }
-
-    async signOut(): Promise<any> {
-        return this.sendHttpRequest('DELETE', `/auth/sign_out`)
-    }
-
-    redirectLogin() {
-        let redirectURI = `${APP_BASE_URL}/login`
-        if (window.localStorage.getItem('platform') === 'cordova') {
-            redirectURI = `${MOBILE_APP_NAMESPACE}://${AUTH0_DOMAIN}/cordova/${MOBILE_APP_NAMESPACE}/callback`
+    getAnalysis(url: string, runUUID: string, data: object,): {promise: Promise<any>, xhr: XMLHttpRequest} {
+        let method = 'GET'
+        if (data != null) {
+            method = 'POST'
         }
-        window.location.href = `https://${AUTH0_DOMAIN}/authorize?response_type=token&client_id=${AUTH0_CLIENT_ID}&redirect_uri=${redirectURI}&scope=openid%20profile%20email`
-    }
 
-    redirectLogout() {
-        window.location.href = `https://${AUTH0_DOMAIN}/v2/logout?client_id=${AUTH0_CLIENT_ID}&returnTo=${APP_BASE_URL}`
-    }
-
-    async getIsUserLogged(): Promise<any> {
-        return this.sendHttpRequest('GET', `/auth/is_logged`)
-    }
-
-    async getAnalysis(url: string, runUUID: string): Promise<any> {
-        return this.sendHttpRequest('GET', `/${url}/${runUUID}`, {})
+        return this.sendHttpRequest(method,
+            `/${url}/${runUUID}`, data)
     }
 
     async getCustomAnalysis(url: string): Promise<any> {
-        return this.sendHttpRequest('GET', `/${url}`, {})
+        return this.sendHttpRequest('GET', `/${url}`, {})['promise']
     }
 
     async setAnalysis(url: string, runUUID: string, data): Promise<any> {
-        return this.sendHttpRequest('POST', `/${url}/${runUUID}`, data)
+        return this.sendHttpRequest('POST', `/${url}/${runUUID}`, data)['promise']
     }
 
     async getPreferences(url: string, runUUID: string): Promise<any> {
-        return this.sendHttpRequest('GET', `/${url}/preferences/${runUUID}`, {})
+        return this.sendHttpRequest('GET', `/${url}/preferences/${runUUID}`, {})['promise']
     }
 
     async updatePreferences(url: string, runUUID: string, data: object): Promise<any> {
-        return this.sendHttpRequest('POST', `/${url}/preferences/${runUUID}`, data)
+        return this.sendHttpRequest('POST', `/${url}/preferences/${runUUID}`, data)['promise']
     }
 
-    async startTensorBoard(computerUUId: string, runUUIDs: Array<string>): Promise<any> {
-        return this.sendHttpRequest('POST', `/start_tensorboard/${computerUUId}`, {'runs': runUUIDs})
+    async createMagicMetric(runUUID: string): Promise<any> {
+        return this.sendHttpRequest('GET', `/custom_metrics/${runUUID}/magic`, {})['promise']
     }
 
-    async clearCheckPoints(computerUUId: string, runUUIDs: Array<string>): Promise<any> {
-        return this.sendHttpRequest('POST', `/clear_checkpoints/${computerUUId}`, {'runs': runUUIDs})
+    async createCustomMetric(runUUID: string, data: object): Promise<any> {
+        return this.sendHttpRequest('POST', `/custom_metrics/${runUUID}/create`, data)['promise']
     }
 
-    private sendHttpRequest = (method: string, url: string, data: object = {}) => {
-        return new Promise((resolve, reject) => {
-            const xhr = new XMLHttpRequest()
+    async getCustomMetrics(runUUID: string): Promise<any> {
+        return this.sendHttpRequest('GET', `/custom_metrics/${runUUID}`, {})['promise']
+    }
+
+    async deleteCustomMetric(runUUID: string, metricUUID: string): Promise<any> {
+        return this.sendHttpRequest('POST', `/custom_metrics/${runUUID}/delete`, {id: metricUUID})['promise']
+    }
+
+    async updateCustomMetric(runUUID: string, data: object): Promise<any> {
+        return this.sendHttpRequest('POST', `/custom_metrics/${runUUID}`, data)['promise']
+    }
+
+    async getLogs(runUUID: string, url: string, pageNo: any): Promise<any> {
+        return this.sendHttpRequest('POST', `/logs/${url}/${runUUID}`, {
+            'page': pageNo
+        })['promise']
+    }
+
+    async updateLogOptions(runUUID: string, url: string, wrapLogs: boolean): Promise<any> {
+        return this.sendHttpRequest('POST', `/logs/${url}/${runUUID}/opt`, {
+            'wrap_logs': wrapLogs
+        })['promise']
+    }
+
+    private sendHttpRequest = (method: string, url: string, data: object = {}, retryAuth: boolean = true): {promise: Promise<any>, xhr: XMLHttpRequest} => {
+        const xhr = new XMLHttpRequest()
+        let promise = new Promise((resolve, reject) => {
             xhr.withCredentials = true
             xhr.open(method, this.baseURL + url)
             xhr.responseType = 'json'
 
-            let authToken = localStorage.getItem('app_token')
-            if (authToken) {
-                xhr.setRequestHeader('Authorization', authToken)
+            let appToken = url.includes('/auth/') && !url.includes('/auth/send_verification_email') ? getAppToken() : this.sessionToken
+            if (appToken != null) {
+                let authDict = {'token': appToken}
+                xhr.setRequestHeader('Authorization', JSON.stringify(authDict))
             }
 
             if (data) {
                 xhr.setRequestHeader('Content-Type', 'application/json')
             }
 
-            xhr.onload = () => {
-                if (xhr.status >= 400) {
-                    if (xhr.status != 403) {
-                        reject(new NetworkError(xhr.status, url, JSON.stringify(xhr.response)))
+            xhr.onload = async () => {
+                let token = xhr.getResponseHeader('Authorization')
+                if (token != null) {
+                    if (url.includes('/auth/sign_in') || url.includes('/auth/sign_up')) {
+                        setAppToken(token)
+                    } else {
+                        this.updateSession(token)
                     }
+                }
+                if (xhr.status == 401 && retryAuth) {
+                    await this.getUser()
+                    try {
+                        let res = await this.sendHttpRequest(method, url, data, false)
+                        resolve(res)
+                    } catch (e) {
+                        reject(e)
+                    }
+                }
+
+                if (xhr.status >= 400) {
+                    let errorMessage: string = null
+                    if (xhr.response != null) {
+                        if (xhr.response.hasOwnProperty('error')) {
+                            errorMessage = xhr.response.error
+                        } else if (xhr.response.hasOwnProperty('data') && xhr.response.data.hasOwnProperty('error')) {
+                            errorMessage = xhr.response.data.error
+                        }
+                    }
+                    reject(new NetworkError(xhr.status, url, JSON.stringify(xhr.response), errorMessage))
                 } else {
                     resolve(xhr.response)
                 }
             }
 
-            xhr.onerror = () => {
-                reject('Network Failure')
+            xhr.onerror = (event) => {
+                reject(new NetworkError(xhr.status, url, xhr.responseText,
+                    `XHR request failed: ${event}\n Type: ${event.type}: ${event.loaded} bytes transferred`))
             }
 
             xhr.send(JSON.stringify(data))
         })
+
+        return {'promise': promise, 'xhr': xhr}
     }
+
+    private updateSession(token?: string) {
+        this.sessionToken = token
+    }
+}
+
+export interface ErrorResponse {
+    is_successful: boolean
+    error?: string
 }
 
 export class NetworkError {
     statusCode: number
     url: string
     message?: string
+    errorDescription?: string
+    stackTrace?: string
 
-    constructor(statusCode: number, url: string, message?: string) {
+    constructor(statusCode: number, url: string, message?: string, description?: string) {
         this.statusCode = statusCode
         this.url = url
         this.message = message
+
+        try {
+            let jsonMessage = JSON.parse(message)
+            this.stackTrace = jsonMessage['trace']
+        } catch (e) {
+            // there's no stack strace.
+        }
+
+        this.errorDescription = description
+    }
+
+    toString() {
+        return `Status Code: ${this.statusCode}\n
+        URL: ${this.url}\n
+        Description: ${this.errorDescription}\n
+        Message: ${this.message}\n
+        StackTrace: ${this.stackTrace}`
     }
 }
 

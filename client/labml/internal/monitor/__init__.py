@@ -1,14 +1,15 @@
 import typing
 from typing import Optional, List, Union, Tuple
 
-from labml.internal.util.colors import StyleCode
 from .iterator import Iterator
 from .loop import Loop
 from .mix import Mix
 from .sections import Section, OuterSection
+from .time_recorder import TimeRecorder, Summary as TimeSummary
 from ..logger import logger_singleton as logger
 from ..logger.types import LogPart
 from ..tracker import tracker_singleton as tracker
+from ..util.colors import StyleCode
 from ...logger import Text
 from ...utils.notice import labml_notice
 
@@ -23,6 +24,7 @@ class Monitor:
         self.__is_looping = False
         self.__loop_indicators = []
         self.__is_silent = False
+        self.__time_recorder = TimeRecorder()
 
     def clear(self):
         self.__loop: Optional[Loop] = None
@@ -33,11 +35,13 @@ class Monitor:
     def silent(self, is_silent: bool = True):
         self.__is_silent = is_silent
 
-    def mix(self, total_iterations, iterators: List[Tuple[str, typing.Sized]],
+    def mix(self, total_iterations: int, iterators: List[Tuple[str, typing.Sized]],
             is_monit: bool):
         return Mix(total_iterations=total_iterations,
                    iterators=iterators,
-                   is_monit=is_monit, logger=self)
+                   is_monit=is_monit and self.__is_looping,
+                   monitor=self,
+                   )
 
     def iterate(self, name, iterable: Union[typing.Iterable, typing.Sized, int],
                 total_steps: Optional[int], *,
@@ -131,6 +135,12 @@ class Monitor:
 
         self.__sections[-1].is_successful = is_successful
         self.__log_line()
+
+    def record_time(self, name: str):
+        return self.__time_recorder.record_time(name)
+
+    def get_recorded_times(self, ignore_first: int, ignore_last: int) -> typing.Dict[str, TimeSummary]:
+        return self.__time_recorder.get_times(ignore_first, ignore_last)
 
     def loop(self, iterator_: typing.Collection, *,
              is_track: bool,

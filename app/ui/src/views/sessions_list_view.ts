@@ -7,7 +7,6 @@ import {CancelButton, DeleteButton, EditButton} from '../components/buttons'
 import {SessionsListItemModel} from '../models/session_list'
 import {SessionsListItemView} from '../components/sessions_list_item'
 import {HamburgerMenuView} from '../components/hamburger_menu'
-import mix_panel from "../mix_panel"
 import EmptySessionsList from "./empty_sessions_list"
 import {UserMessages} from "../components/user_messages"
 import {AwesomeRefreshButton} from '../components/refresh_button'
@@ -29,7 +28,6 @@ class SessionsListView extends ScreenView {
     isEditMode: boolean
     sessionsDeleteSet: Set<string>
     private loader: DataLoader
-    private userMessages: UserMessages
     private refresh: AwesomeRefreshButton
 
     constructor() {
@@ -41,8 +39,6 @@ class SessionsListView extends ScreenView {
         this.editButton = new EditButton({onButtonClick: this.onEdit, parent: this.constructor.name})
         this.cancelButton = new CancelButton({onButtonClick: this.onCancel, parent: this.constructor.name})
 
-        this.userMessages = new UserMessages()
-
         this.loader = new DataLoader(async (force) => {
             this.currentSessionsList = (await this.sessionListCache.get(force)).sessions
         })
@@ -52,7 +48,6 @@ class SessionsListView extends ScreenView {
         this.isEditMode = false
         this.sessionsDeleteSet = new Set<string>()
 
-        mix_panel.track('Computers List View')
     }
 
     async _render() {
@@ -60,7 +55,6 @@ class SessionsListView extends ScreenView {
         this.elem.innerHTML = ''
         $(this.elem, $ => {
             $('div', $ => {
-                this.userMessages.render($)
                 new HamburgerMenuView({
                     title: 'Computers',
                     setButtonContainer: container => this.buttonContainer = container
@@ -86,7 +80,7 @@ class SessionsListView extends ScreenView {
         try {
             await this.loader.load()
 
-            this.renderList().then()
+            this.renderList()
         } catch (e) {
             handleNetworkErrorInplace(e)
         }
@@ -138,6 +132,7 @@ class SessionsListView extends ScreenView {
 
     onEdit = () => {
         this.isEditMode = true
+        this.refresh.disabled = true
         this.deleteButton.disabled = this.sessionsDeleteSet.size === 0
         this.updateButtons()
     }
@@ -151,16 +146,21 @@ class SessionsListView extends ScreenView {
             this.deleteButton.disabled = this.sessionsDeleteSet.size === 0
 
             await this.loader.load()
-            await this.renderList()
         } catch (e) {
-            this.userMessages.networkError()
+            UserMessages.shared.networkError(e, "Failed to delete sessions")
+            return
+        } finally {
+            this.refresh.disabled = false
         }
+
+        this.renderList()
     }
 
     onCancel = () => {
         this.isEditMode = false
+        this.refresh.disabled = false
         this.sessionsDeleteSet.clear()
-        this.renderList().then()
+        this.renderList()
     }
 
     onItemClicked = (elem: SessionsListItemView) => {
@@ -183,10 +183,10 @@ class SessionsListView extends ScreenView {
     onSearch = async (query: string) => {
         this.searchQuery = query
         await this.loader.load()
-        this.renderList().then()
+        this.renderList()
     }
 
-    private async renderList() {
+    private renderList() {
         if (this.currentSessionsList.length > 0) {
             let re = new RegExp(this.searchQuery.toLowerCase(), 'g')
             this.currentSessionsList = this.currentSessionsList.filter(session => this.sessionsFilter(session, re))

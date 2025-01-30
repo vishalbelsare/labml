@@ -1,12 +1,15 @@
 {
   "compilerOptions": {
-    "target": "es5",
+    "target": "es2019",
     "module": "CommonJS",
     "moduleResolution": "node",
     "sourceMap": true,
     "outDir": "dist",
     "allowJs": true,
-    "downlevelIteration": true
+    "downlevelIteration": true,
+    "typeRoots": [
+      "node_modules/@types"
+    ]
   },
   "include": [
     "ui/src",

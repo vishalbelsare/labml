@@ -3,11 +3,10 @@ import {MenuButton, NavButton} from './buttons'
 import {Loader} from './loader'
 import CACHE, {UserCache} from "../cache/cache"
 import {User} from '../models/user'
-import NETWORK from '../network'
-import {handleNetworkError} from '../utils/redirect';
-import {Sentry} from '../sentry';
+import {ROUTER} from '../app'
+import {getPath} from '../utils/document'
 
-const DEFAULT_IMAGE = 'https://raw.githubusercontent.com/azouaoui-med/pro-sidebar-template/gh-pages/src/img/user.jpg'
+const DEFAULT_IMAGE = '/images/user.png'
 
 export interface HamburgerMenuOptions {
     title: string
@@ -70,19 +69,8 @@ export class HamburgerMenuView {
         }
     }
 
-    onLogOut = async () => {
-        try {
-            let res = await NETWORK.signOut()
-            if (res.is_successful) {
-                localStorage.removeItem('app_token')
-                NETWORK.redirectLogout()
-            } else {
-                Sentry.captureException("Logout failed")
-            }
-        } catch (e) {
-            handleNetworkError(e)
-            return
-        }
+    onLogOut = () => {
+        ROUTER.navigate(`/auth/sign_out?redirect_url=${encodeURIComponent(getPath())}`)
     }
 
     private async renderProfile() {
@@ -95,14 +83,6 @@ export class HamburgerMenuView {
         this.loader.remove()
 
         $(this.navLinksContainer, $ => {
-            $('div', '.text-center', $ => {
-                $('img', '.mt-2.image-style.rounded-circle', {
-                    src: this.user.picture || DEFAULT_IMAGE
-                })
-                $('div', '.mb-5.mt-3.mt-2', $ => {
-                    $('h5', this.user.name)
-                })
-            })
             new NavButton({
                 icon: '.fas.fa-running',
                 text: 'Runs',
@@ -129,12 +109,12 @@ export class HamburgerMenuView {
                 parent: this.constructor.name
             }).render($)
             $('span', '.mt-5', '')
-            new NavButton({
-                icon: '.fas.fa-power-off',
-                text: 'Log out',
-                onButtonClick: this.onLogOut,
-                parent: this.constructor.name
-            }).render($)
+            // new NavButton({
+            //     icon: '.fas.fa-power-off',
+            //     text: 'Sign out',
+            //     onButtonClick: this.onLogOut,
+            //     parent: this.constructor.name
+            // }).render($)
         })
     }
 }

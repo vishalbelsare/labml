@@ -6,6 +6,12 @@ This module lets you get constants like paths and set
 
 .. automodule:: labml.lab
 
+    .. autofunction:: get_computer_name
+
+    .. autofunction:: get_computer_uuid
+
+    .. autofunction:: get_info
+    
     .. autofunction:: get_path
 
     .. autofunction:: get_data_path

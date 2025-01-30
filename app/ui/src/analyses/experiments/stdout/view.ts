@@ -1,4 +1,4 @@
-import {Run} from "../../../models/run"
+import {LogModel, Logs, Run} from "../../../models/run"
 import CACHE, {RunCache, RunStatusCache} from "../../../cache/cache"
 import {Weya as $, WeyaElement} from "../../../../../lib/weya/weya"
 import Filter from "../../../utils/ansi_to_html"
@@ -7,12 +7,13 @@ import {ROUTER, SCREEN} from "../../../app"
 import {BackButton} from "../../../components/buttons"
 import {RunHeaderCard} from "../run_header/card"
 import {DataLoader} from "../../../components/loader"
-import mix_panel from "../../../mix_panel"
 import {ViewHandler} from "../../types"
-import {AwesomeRefreshButton} from '../../../components/refresh_button'
+import {RefreshButton} from '../../../components/refresh_button'
 import {handleNetworkErrorInplace} from '../../../utils/redirect'
 import {setTitle} from '../../../utils/document'
 import {ScreenView} from '../../../screen_view'
+import stdOutCache from "./cache"
+import {LogView} from "../../../components/log_view"
 
 class StdOutView extends ScreenView {
     elem: HTMLDivElement
@@ -23,10 +24,12 @@ class StdOutView extends ScreenView {
     runCache: RunCache
     actualWidth: number
     outputContainer: HTMLDivElement
+    logView: LogView
     runHeaderCard: RunHeaderCard
     filter: Filter
     private loader: DataLoader
-    private refresh: AwesomeRefreshButton
+    private refresh: RefreshButton
+    private stdOut: Logs
 
     constructor(uuid: string) {
         super()
@@ -38,11 +41,15 @@ class StdOutView extends ScreenView {
 
         this.loader = new DataLoader(async (force) => {
             this.status = await this.statusCache.get(force)
+            this.stdOut = await stdOutCache.getLogCache(this.uuid).getLast(force)
             this.run = await this.runCache.get(force)
         })
-        this.refresh = new AwesomeRefreshButton(this.onRefresh.bind(this))
-
-        mix_panel.track('Analysis View', {uuid: this.uuid, analysis: this.constructor.name})
+        this.refresh = new RefreshButton(this.onRefresh.bind(this))
+        this.logView = new LogView(new Logs(<LogModel>{pages: {}, page_length: 0}), async (currentPage): Promise<Logs> => {
+            return await stdOutCache.getLogCache(this.uuid).getPage(currentPage, false)
+        }, async (wrap: boolean): Promise<boolean> => {
+            return await stdOutCache.getLogCache(this.uuid).updateLogWrap(wrap)
+        })
     }
 
     get requiresAuth(): boolean {
@@ -71,12 +78,15 @@ class StdOutView extends ScreenView {
                     })
                     this.runHeaderCard = new RunHeaderCard({
                         uuid: this.uuid,
-                        width: this.actualWidth
+                        width: this.actualWidth,
+                        showRank: false
                     })
                     this.runHeaderCard.render($).then()
                     $('h2', '.header.text-center', 'Standard Out')
                     this.loader.render($)
-                    this.outputContainer = $('div', '.terminal-card')
+                    this.outputContainer = $('div', '.terminal-card' , $ => {
+                        this.logView.render($)
+                    })
                 })
             })
         })
@@ -88,11 +98,6 @@ class StdOutView extends ScreenView {
             this.renderOutput()
         } catch (e) {
             handleNetworkErrorInplace(e)
-        } finally {
-            if (this.status && this.status.isRunning) {
-                this.refresh.attachHandler(this.runHeaderCard.renderLastRecorded.bind(this.runHeaderCard))
-                this.refresh.start()
-            }
         }
     }
 
@@ -105,34 +110,30 @@ class StdOutView extends ScreenView {
     }
 
     destroy() {
-        this.refresh.stop()
+
     }
 
     async onRefresh() {
         try {
+            stdOutCache.getLogCache(this.uuid).invalidate_cache()
+            this.logView.invalidateLogs()
+
             await this.loader.load(true)
 
             this.renderOutput()
         } catch (e) {
-
+            handleNetworkErrorInplace(e)
         } finally {
-            if (this.status && !this.status.isRunning) {
-                this.refresh.stop()
-            }
             await this.runHeaderCard.refresh().then()
         }
     }
 
     onVisibilityChange() {
-        this.refresh.changeVisibility(!document.hidden)
+
     }
 
     renderOutput() {
-        this.outputContainer.innerHTML = ''
-        $(this.outputContainer, $ => {
-            let output = $('pre', '')
-            output.innerHTML = this.filter.toHtml(this.run.stdout)
-        })
+        this.logView.addLogs(this.stdOut)
     }
 }
 

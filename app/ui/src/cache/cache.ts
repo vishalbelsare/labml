@@ -1,15 +1,18 @@
-import {AnalysisDataModel, Run} from "../models/run"
+import {AnalysisData, CustomMetric, CustomMetricList, CustomMetricModel, Logs, LogUpdateType, Run} from "../models/run"
 import {Status} from "../models/status"
-import NETWORK from "../network"
-import {IsUserLogged, User} from "../models/user"
-import {RunsList} from '../models/run_list'
-import {AnalysisPreference} from "../models/preferences"
+import NETWORK, {ErrorResponse} from "../network"
+import { User} from "../models/user"
+import {RunListItemModel, RunsList} from '../models/run_list'
+import {AnalysisPreferenceModel, ComparisonPreferenceModel} from "../models/preferences"
 import {SessionsList} from '../models/session_list'
 import {Session} from '../models/session'
-import {Job} from '../models/job'
+import {ProcessData} from "../analyses/sessions/process/types"
+import {Config} from "../models/config"
+import {DataStore} from "../models/data_store";
 
 const RELOAD_TIMEOUT = 60 * 1000
-const FORCE_RELOAD_TIMEOUT = 5 * 1000
+const FORCE_RELOAD_TIMEOUT = -1 // Added to stop misuse from free users.
+// Ignored because there's no free version at the moment
 
 export function isReloadTimeout(lastUpdated: number): boolean {
     return (new Date()).getTime() - lastUpdated > RELOAD_TIMEOUT
@@ -82,7 +85,7 @@ export abstract class CacheObject<T> {
     public lastUpdated: number
     protected data!: T
     protected broadcastPromise = new BroadcastPromise<T>()
-    private lastUsed: number
+    protected lastUsed: number
 
     constructor() {
         this.lastUsed = 0
@@ -103,25 +106,70 @@ export abstract class CacheObject<T> {
     }
 
     invalidate_cache(): void {
-        this.data = null
+        delete this.data
+    }
+}
+
+export class DataStoreCache extends CacheObject<DataStore> {
+    private readonly runUUID: string
+
+    constructor(runUUID: string) {
+        super();
+        this.runUUID = runUUID
+    }
+    load(args: any): Promise<any> {
+        return NETWORK.getDataStore(args)
+    }
+
+    async get(isRefresh: boolean = false): Promise<DataStore> {
+        if (this.data == null || isRefresh) {
+            let res = await this.load(this.runUUID)
+            this.data = new DataStore(res)
+        }
+
+        return this.data
+    }
+
+    async update(data: any): Promise<any> {
+        let res = await NETWORK.setDataStore(this.runUUID, {
+            'yaml_string': data
+        })
+        this.data = new DataStore(res)
+
+        return this.data
     }
 }
 
 export class RunsListCache extends CacheObject<RunsList> {
+    private loadedTags: Set<string>
+
+    constructor() {
+        super()
+
+        this.loadedTags = new Set<string>()
+    }
+
+
     async load(...args: any[]): Promise<RunsList> {
         return this.broadcastPromise.create(async () => {
             let res = await NETWORK.getRuns(args[0])
-            return new RunsList(res)
+            let runsList = new RunsList(res)
+
+            this.loadedTags.add(args[0])
+            return runsList
         })
     }
 
     async get(isRefresh = false, ...args: any[]): Promise<RunsList> {
-        if (args && args[0]) {
-            return await this.load(args[0])
+        let tag = ""
+        if (args) {
+            tag = args[0] ?? ""
         }
 
-        if (this.data == null || (isRefresh && isForceReloadTimeout(this.lastUpdated)) || isReloadTimeout(this.lastUpdated)) {
-            this.data = await this.load(null)
+        if (this.data == null || !(this.loadedTags.has("") || this.loadedTags.has(tag)) ||
+            (isRefresh && isForceReloadTimeout(this.lastUpdated)) ||
+            isReloadTimeout(this.lastUpdated)) {
+            this.data = await this.load(tag)
             this.lastUpdated = (new Date()).getTime()
         }
 
@@ -129,6 +177,7 @@ export class RunsListCache extends CacheObject<RunsList> {
     }
 
     async deleteRuns(runUUIDS: Array<string>): Promise<void> {
+        await NETWORK.deleteRuns(runUUIDS)
         let runs = []
         // Only updating the cache manually, if the cache exists
         if (this.data) {
@@ -141,7 +190,6 @@ export class RunsListCache extends CacheObject<RunsList> {
 
             this.data.runs = runs
         }
-        await NETWORK.deleteRuns(runUUIDS)
     }
 
     async addRun(run: Run): Promise<void> {
@@ -154,16 +202,24 @@ export class RunsListCache extends CacheObject<RunsList> {
         this.invalidate_cache()
     }
 
-    async startTensorBoard(computerUUID, runUUIDs: Array<string>): Promise<Job> {
-        let res = await NETWORK.startTensorBoard(computerUUID, runUUIDs)
+    async localUpdateRun(run: Run) {
+        if (this.data == null) {
+            return
+        }
 
-        return new Job(res)
-    }
-
-    async clearCheckPoints(computerUUID, runUUIDs: Array<string>): Promise<Job> {
-        let res = await NETWORK.clearCheckPoints(computerUUID, runUUIDs)
-
-        return new Job(res)
+        for (let runItem of this.data.runs) {
+            if (runItem.run_uuid == run.run_uuid) {
+                runItem.name = run.name
+                runItem.comment = run.comment
+                runItem.favorite_configs = []
+                runItem.tags = run.tags
+                for (let c of run.configs) {
+                    if (run.favourite_configs.includes(c.name)) {
+                        runItem.favorite_configs.push(new Config(c))
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -234,8 +290,8 @@ export class RunCache extends CacheObject<Run> {
         return this.data
     }
 
-    async setRun(run: Run): Promise<void> {
-        await NETWORK.setRun(this.uuid, run)
+    async updateRunData(data: Record<string, any>): Promise<void> {
+        await NETWORK.updateRunData(this.uuid, data)
     }
 }
 
@@ -298,7 +354,7 @@ export class UserCache extends CacheObject<User> {
     async load(): Promise<User> {
         return this.broadcastPromise.create(async () => {
             let res = await NETWORK.getUser()
-            return new User(res)
+            return new User(res.user)
         })
     }
 
@@ -307,38 +363,34 @@ export class UserCache extends CacheObject<User> {
     }
 }
 
-export class IsUserLoggedCache extends CacheObject<IsUserLogged> {
-    set userLogged(is_user_logged: boolean) {
-        this.data = new IsUserLogged({is_user_logged: is_user_logged})
-    }
+export abstract class BaseDataCache<T> extends CacheObject<T> {
+    protected readonly uuid: string
+    protected readonly url: string
+    protected statusCache: StatusCache
+    protected readonly isExperiment: boolean
+    protected currentXHR: XMLHttpRequest | null
 
-    async load(): Promise<IsUserLogged> {
-        return this.broadcastPromise.create(async () => {
-            let res = await NETWORK.getIsUserLogged()
-            return new IsUserLogged(res)
-        })
-    }
-}
-
-export class AnalysisDataCache extends CacheObject<AnalysisDataModel> {
-    private readonly uuid: string
-    private readonly url: string
-    private statusCache: StatusCache
-
-    constructor(uuid: string, url: string, statusCache: StatusCache) {
+    constructor(uuid: string, url: string, statusCache: StatusCache, isExperiment: boolean = false) {
         super()
         this.uuid = uuid
         this.statusCache = statusCache
         this.url = url
+        this.isExperiment = isExperiment
+        this.currentXHR = null
     }
 
-    async load(): Promise<AnalysisDataModel> {
+    async load(): Promise<T> {
         return this.broadcastPromise.create(async () => {
-            return await NETWORK.getAnalysis(this.url, this.uuid)
+            let response =
+                NETWORK.getAnalysis(this.url, this.uuid, null)
+            this.currentXHR = response.xhr
+            let data = await response.promise
+            this.currentXHR = null
+            return this.createInstance(data)
         })
     }
 
-    async get(isRefresh = false): Promise<AnalysisDataModel> {
+    async get(isRefresh = false): Promise<T> {
         let status = await this.statusCache.get()
 
         if (this.data == null || (status.isRunning && isReloadTimeout(this.lastUpdated)) || (isRefresh && isForceReloadTimeout(this.lastUpdated))) {
@@ -353,12 +405,22 @@ export class AnalysisDataCache extends CacheObject<AnalysisDataModel> {
         return this.data
     }
 
-    async setAnalysis(data: {}): Promise<void> {
-        await NETWORK.setAnalysis(this.url, this.uuid, data)
+    protected abstract createInstance(data: any): T;
+}
+
+export class AnalysisDataCache extends BaseDataCache<AnalysisData> {
+    protected createInstance(data: any): AnalysisData {
+        return new AnalysisData(data);
     }
 }
 
-export class AnalysisPreferenceCache extends CacheObject<AnalysisPreference> {
+export class ProcessDataCache extends BaseDataCache<ProcessData> {
+    protected createInstance(data: any): ProcessData {
+        return new ProcessData(data);
+    }
+}
+
+export class AnalysisPreferenceCache extends CacheObject<AnalysisPreferenceModel> {
     private readonly uuid: string
     private readonly url: string
 
@@ -368,25 +430,200 @@ export class AnalysisPreferenceCache extends CacheObject<AnalysisPreference> {
         this.url = url
     }
 
-    async load(): Promise<AnalysisPreference> {
+    async load(): Promise<AnalysisPreferenceModel> {
         return this.broadcastPromise.create(async () => {
             return await NETWORK.getPreferences(this.url, this.uuid)
         })
     }
 
-    async setPreference(preference: AnalysisPreference): Promise<void> {
+    async setPreference(preference: AnalysisPreferenceModel): Promise<void> {
+        this.data = preference
         await NETWORK.updatePreferences(this.url, this.uuid, preference)
     }
 }
 
+export class ComparisonAnalysisPreferenceCache extends CacheObject<ComparisonPreferenceModel> {
+    private readonly uuid: string
+    private readonly url: string
+
+    constructor(uuid: string, url: string) {
+        super()
+        this.uuid = uuid
+        this.url = url
+    }
+
+    async load(): Promise<ComparisonPreferenceModel> {
+        return this.broadcastPromise.create(async () => {
+            return await NETWORK.getPreferences(this.url, this.uuid)
+        })
+    }
+
+    async setPreference(preference: ComparisonPreferenceModel): Promise<void> {
+        this.data = structuredClone(preference)
+
+        await NETWORK.updatePreferences(this.url, this.uuid, preference)
+    }
+
+    async deleteBaseExperiment(): Promise<ComparisonPreferenceModel> {
+        if (this.data == null) {
+            return null
+        }
+
+        this.data.base_experiment = ''
+        this.data.base_series_preferences = []
+        this.data.base_series_names = []
+
+        await NETWORK.updatePreferences(this.url, this.uuid, this.data)
+
+        return this.data
+    }
+
+    async updateBaseExperiment(run: RunListItemModel): Promise<ComparisonPreferenceModel> {
+        if (this.data == null) {
+            return null
+        }
+
+        this.data.base_experiment = run.run_uuid
+        this.data.base_series_preferences = []
+        this.data.base_series_names = []
+        this.data.is_base_distributed = run.world_size != 0
+
+        await NETWORK.updatePreferences(this.url, this.uuid, this.data)
+
+        return this.data
+    }
+}
+
+export class CustomMetricCache extends CacheObject<CustomMetricList> {
+    private readonly uuid: string
+
+    constructor(uuid: string) {
+        super()
+        this.uuid = uuid
+    }
+
+    async load(): Promise<CustomMetricList> {
+        let data = await NETWORK.getCustomMetrics(this.uuid)
+        return new CustomMetricList(data)
+    }
+
+    async createMetric(data: object): Promise<CustomMetric> {
+        let customMetricModel = await NETWORK.createCustomMetric(this.uuid, data)
+        let customMetric = new CustomMetric(customMetricModel)
+
+        if (this.data == null) {
+            this.data = new CustomMetricList({metrics: [customMetricModel]})
+        }
+
+        this.data.addMetric(customMetric)
+
+        return customMetric
+    }
+
+    async deleteMetric(metricUUID: string): Promise<void> {
+        await NETWORK.deleteCustomMetric(this.uuid, metricUUID)
+
+        if (this.data != null) {
+            this.data.removeMetric(metricUUID)
+        }
+    }
+    
+    async updateMetric(data: object): Promise<void> {
+        await NETWORK.updateCustomMetric(this.uuid, data)
+        if (this.data != null) {
+            this.data.updateMetric(new CustomMetric(<CustomMetricModel>data))
+        }
+    }
+}
+
+export class LogCache extends CacheObject<Logs> {
+    private readonly url: string
+    private readonly uuid: string
+
+    constructor(uuid: string, url: string) {
+        super();
+
+        this.url = url
+        this.uuid = uuid
+    }
+
+    load(...args: any[]): Promise<Logs> {
+        return this.broadcastPromise.create(async () => {
+            let data = await NETWORK.getLogs(this.uuid, this.url, args[0])
+            return new Logs(data)
+        })
+    }
+
+    private async getAll(isRefresh = false): Promise<Logs> {
+        if (isRefresh || this.data == null) {
+            let data = new Logs(await NETWORK.getLogs(this.uuid, this.url, LogUpdateType.ALL))
+            this.data.mergeLogs(data)
+            return this.data
+        }
+
+        for (let pageNo = 0; pageNo < this.data.pageLength; pageNo++) {
+            if (!this.data.hasPage(pageNo)) {
+                let data = new Logs(await NETWORK.getLogs(this.uuid, this.url, LogUpdateType.ALL))
+                this.data.mergeLogs(data)
+                break
+            }
+        }
+
+        return this.data
+    }
+
+    async getLast(isRefresh = false): Promise<Logs> {
+        if (!isRefresh && this.data != null && this.data.hasPage(this.data.pageLength - 1)) {
+            return this.data.getPageAsLog(this.data.pageLength - 1)
+        }
+
+        await this.get(isRefresh)
+        return this.data
+    }
+
+    async getPage(pageNo: number, isRefresh = false): Promise<Logs> {
+        if (pageNo == -2) {
+            return await this.getAll(isRefresh)
+        }
+
+        await this.get(false)
+
+        if (!isRefresh && this.data.hasPage(pageNo)) {
+            return this.data.getPageAsLog(pageNo)
+        }
+
+        let data = new Logs(await NETWORK.getLogs(this.uuid, this.url, pageNo))
+        this.data.mergeLogs(data)
+        return data
+    }
+
+    async get(isRefresh = false, ...args: any[]): Promise<Logs> {
+        if (this.data == null || (isRefresh && isForceReloadTimeout(this.lastUpdated)) || isReloadTimeout(this.lastUpdated)) {
+            this.data = await this.load(LogUpdateType.LAST)
+
+            this.lastUpdated = (new Date()).getTime()
+        }
+
+        this.lastUsed = new Date().getTime()
+
+        return this.data
+    }
+
+    async updateLogWrap(wrapLogs: boolean): Promise<boolean> {
+        let res = await NETWORK.updateLogOptions(this.uuid, this.url, wrapLogs)
+        return res.is_successful == true
+    }
+}
+
 class Cache {
-    private readonly runs: { [uuid: string]: RunCache }
-    private readonly sessions: { [uuid: string]: SessionCache }
-    private readonly runStatuses: { [uuid: string]: RunStatusCache }
-    private readonly sessionStatuses: { [uuid: string]: SessionStatusCache }
+    private runs: { [uuid: string]: RunCache }
+    private customMetrics: { [uuid: string]: CustomMetricCache }
+    private sessions: { [uuid: string]: SessionCache }
+    private runStatuses: { [uuid: string]: RunStatusCache }
+    private sessionStatuses: { [uuid: string]: SessionStatusCache }
+    private dataStores: { [uuid: string]: DataStoreCache }
 
     private user: UserCache | null
-    private isUserLogged: IsUserLoggedCache | null
     private runsList: RunsListCache | null
     private sessionsList: SessionsListCache | null
 
@@ -395,10 +632,27 @@ class Cache {
         this.sessions = {}
         this.runStatuses = {}
         this.sessionStatuses = {}
-        this.user = null
+        this.customMetrics = {}
+        this.dataStores = {}
         this.runsList = null
+        this.user = null
         this.sessionsList = null
-        this.isUserLogged = null
+    }
+
+    getDataStore(uuid: string) {
+        if (this.dataStores[uuid] == null) {
+            this.dataStores[uuid] = new DataStoreCache(uuid)
+        }
+
+        return this.dataStores[uuid]
+    }
+
+    getCustomMetrics(uuid: string) {
+        if (this.customMetrics[uuid] == null) {
+            this.customMetrics[uuid] = new CustomMetricCache(uuid)
+        }
+
+        return this.customMetrics[uuid]
     }
 
     getRun(uuid: string) {
@@ -457,12 +711,17 @@ class Cache {
         return this.user
     }
 
-    getIsUserLogged() {
-        if (this.isUserLogged == null) {
-            this.isUserLogged = new IsUserLoggedCache()
+    invalidateCache() {
+        this.runs = {}
+        this.sessions = {}
+        this.runStatuses = {}
+        this.sessionStatuses = {}
+        this.customMetrics = {}
+        if (this.user != null) {
+            this.user.invalidate_cache()
         }
-
-        return this.isUserLogged
+        this.runsList = null
+        this.sessionsList = null
     }
 }
 

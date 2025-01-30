@@ -8,26 +8,22 @@ from typing import List
 
 from labml import logger, experiment
 from labml.experiment import generate_uuid
-from labml.internal.api import ApiCaller, SimpleApiDataSource
-from labml.internal.api.logs import ApiLogs
-from labml.internal.api.url import ApiUrlHandler
+from labml.internal.app import AppTracker, SimpleAppTrackDataSource
+from labml.internal.app.logs import AppConsoleLogs
+from labml.internal.app.url import AppUrlResponseHandler
+from labml.internal.lab import get_app_url_for_handle
 from labml.logger import Text
-from typing.io import IO
+from labml.utils.validators import ip_validator
+
+COMMAND_APP_SERVER = 'app-server'
+COMMAND_CAPTURE = 'capture'
+COMMAND_LAUNCH = 'launch'
+COMMAND_MONITOR = 'monitor'
+COMMAND_SERVICE = 'service'
+COMMAND_SERVICE_RUN = 'service-run'
 
 
-def _open_dashboard():
-    try:
-        import labml_dashboard
-    except (ImportError, ModuleNotFoundError):
-        logger.log("Cannot import ", ('labml_dashboard', Text.highlight), '.')
-        logger.log('Install with ',
-                   ('pip install labml_dashboard', Text.value))
-        return
-
-    labml_dashboard.start_server()
-
-
-def _start_app_server():
+def _start_app_server(ip: str, port: int):
     try:
         import labml_app
     except (ImportError, ModuleNotFoundError):
@@ -36,19 +32,19 @@ def _start_app_server():
                    ('pip install labml-app', Text.value))
         return
 
-    labml_app.start_server()
+    labml_app.start_server(ip=ip, port=port)
 
 
 class ExecutorThread(threading.Thread):
     process: subprocess.Popen
 
-    def __init__(self, command: str, api_logs: ApiLogs):
+    def __init__(self, command: str, app_console_logs: AppConsoleLogs):
         super().__init__(daemon=False)
-        self.api_logs = api_logs
+        self.app_console_logs = app_console_logs
         self.command = command
         self.exit_code = 0
 
-    def _read(self, stream: IO, name: str):
+    def _read(self, stream, name: str):
         buffer = ''
         while stream.readable():
             data = stream.read(1)
@@ -57,10 +53,10 @@ class ExecutorThread(threading.Thread):
             buffer += data
             print(data, end='')
             if '\n' in buffer or len(buffer) > 100:
-                self.api_logs.outputs(**{name: buffer})
+                self.app_console_logs.outputs(**{name: buffer})
                 buffer = ''
         if len(buffer) > 0:
-            self.api_logs.outputs(**{name: buffer})
+            self.app_console_logs.outputs(**{name: buffer})
 
     def _read_stdout(self):
         self._read(self.process.stdout, 'stdout_')
@@ -96,22 +92,27 @@ class ExecutorThread(threading.Thread):
 
 
 def _capture(args: List[str]):
-    api_caller = ApiCaller("https://api.labml.ai/api/v1/track?", {'run_uuid': generate_uuid()},
-                           timeout_seconds=120)
-    api_logs = ApiLogs()
+    base_url = get_app_url_for_handle('track')
+    if base_url is None:
+        raise RuntimeError(f'Please specify `labml_app_url` environment variable. '
+                           f'How to setup a labml server https://github.com/labmlai/labml/tree/master/app')
+
+    app_tracker = AppTracker(base_url, {'run_uuid': generate_uuid()},
+                             timeout_seconds=120)
+    app_console_logs = AppConsoleLogs()
     data = {
         'name': 'Capture',
         'comment': ' '.join(args),
         'time': time.time()
     }
 
-    api_caller.add_handler(ApiUrlHandler(True, 'Monitor output at '))
-    api_caller.has_data(SimpleApiDataSource(data))
-    api_logs.set_api(api_caller, frequency=0)
+    app_tracker.add_handler(AppUrlResponseHandler(True, 'Monitor output at '))
+    app_tracker.has_data(SimpleAppTrackDataSource(data))
+    app_console_logs.set_app_tracker(app_tracker, frequency=0)
 
     logger.log('Start capturing...', Text.meta)
     if args:
-        thread = ExecutorThread(' '.join(args), api_logs)
+        thread = ExecutorThread(' '.join(args), app_console_logs)
         thread.start()
         thread.join()
     else:
@@ -124,10 +125,10 @@ def _capture(args: List[str]):
             print(data, end='')
             buffer += data
             if '\n' in buffer or len(buffer) > 100:
-                api_logs.outputs(stdout_=buffer)
+                app_console_logs.outputs(stdout_=buffer)
                 buffer = ''
         if len(buffer) > 0:
-            api_logs.outputs(stdout_=buffer)
+            app_console_logs.outputs(stdout_=buffer)
 
     data = {
         'rank': 0,
@@ -136,12 +137,12 @@ def _capture(args: List[str]):
         'time': time.time()
     }
 
-    api_caller.has_data(SimpleApiDataSource({
+    app_tracker.has_data(SimpleAppTrackDataSource({
         'status': data,
         'time': time.time()
     }))
 
-    api_caller.stop()
+    app_tracker.stop()
 
 
 def _launch(args: List[str]):
@@ -159,7 +160,7 @@ def _launch(args: List[str]):
     else:
         os.environ['PYTHONPATH'] = f"{cwd}:{cwd}/src"
 
-    cmd = [sys.executable, '-u', '-m', 'torch.distributed.launch', *args]
+    cmd = [sys.executable, '-u', '-m', 'torch.distributed.run', *args]
     print(cmd)
     try:
         process = subprocess.Popen(cmd, env=os.environ)
@@ -174,56 +175,55 @@ def _launch(args: List[str]):
 
 
 def _monitor():
-    from labml.internal.computer import process
+    from labml.internal.computer import monitoring_process
     from labml.internal.computer.configs import computer_singleton
 
-    process.run(True, computer_singleton().web_api.open_browser)
+    monitoring_process.run(True, computer_singleton().app_configs.open_browser)
 
 
 def _service():
     from labml.internal.computer.service import service_singleton
 
-    service_singleton().set_token()
     service_singleton().create()
 
 
 def _service_run():
-    from labml.internal.computer import process
+    from labml.internal.computer import monitoring_process
 
-    process.run(True, False)
+    monitoring_process.run(True, False)
 
 
 def main():
-    parser = argparse.ArgumentParser(description='labml.ai CLI')
-    parser.add_argument('command', choices=[
-        'app-server',
-        'capture',
-        'launch',
-        'monitor',
-        'service',
-        'service-run',
-        'dashboard',
-    ])
-    parser.add_argument('args', nargs=argparse.REMAINDER)
+    parser = argparse.ArgumentParser(description='labml.ai CLI', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    subparser = parser.add_subparsers(title='command', dest='command', required=True)
+    app_server_parser = subparser.add_parser(COMMAND_APP_SERVER, help='Start a local instance of labml server',
+                                             formatter_class=parser.formatter_class)
+    app_server_parser.add_argument('--ip', type=ip_validator, default='0.0.0.0', help='IP to bind the server')
+    app_server_parser.add_argument('--port', type=int, default=5005, help='Port to run the server on')
+
+    capture_parser = subparser.add_parser(COMMAND_CAPTURE, help='Create an experiment manually')
+    capture_parser.add_argument('args', nargs=argparse.REMAINDER)
+
+    launch_parser = subparser.add_parser(COMMAND_LAUNCH, help='Start a distributed training session')
+    launch_parser.add_argument('args', nargs=argparse.REMAINDER)
+
+    subparser.add_parser(COMMAND_MONITOR, help='Start hardware monitoring')
+    subparser.add_parser(COMMAND_SERVICE, help='Setup and start a service for hardware monitoring')
+    subparser.add_parser(COMMAND_SERVICE_RUN, help='Start hardware monitoring (for internal use)')
 
     args = parser.parse_args()
 
-    if args.command == 'dashboard':
-        logger.log([('labml dashboard', Text.heading),
-                    (' is deprecated. Please use labml.ai app instead\n', Text.danger),
-                    ('https://github.com/labmlai/labml/tree/master/app', Text.value)])
-        _open_dashboard()
-    elif args.command == 'app-server':
-        _start_app_server()
-    elif args.command == 'capture':
+    if args.command == COMMAND_APP_SERVER:
+        _start_app_server(ip=args.ip, port=args.port)
+    elif args.command == COMMAND_CAPTURE:
         _capture(args.args)
-    elif args.command == 'launch':
+    elif args.command == COMMAND_LAUNCH:
         _launch(args.args)
-    elif args.command == 'monitor':
+    elif args.command == COMMAND_MONITOR:
         _monitor()
-    elif args.command == 'service':
+    elif args.command == COMMAND_SERVICE:
         _service()
-    elif args.command == 'service-run':
+    elif args.command == COMMAND_SERVICE_RUN:
         _service_run()
     else:
         raise ValueError('Unknown command', args.command)
@@ -234,4 +234,4 @@ def _test_capture():
 
 
 if __name__ == '__main__':
-    _test_capture()
+    main()

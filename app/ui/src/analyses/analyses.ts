@@ -1,10 +1,5 @@
 import {Analysis} from "./types"
 
-import metricAnalysis from "./experiments/metrics"
-import hyperPramsAnalysis from "./experiments/hyper_params"
-import gradientAnalysis from "./experiments/grads"
-import parameterAnalysis from "./experiments/params"
-import moduleAnalysis from "./experiments/activations"
 import stdOutAnalysis from "./experiments/stdout"
 import stderrAnalysis from "./experiments/stderror"
 import loggerAnalysis from "./experiments/logger"
@@ -18,19 +13,21 @@ import networkAnalysis from './sessions/network'
 import processAnalysis from './sessions/process'
 import batteryAnalysis from './sessions/battery'
 import sessionConfigsAnalysis from "./sessions/configs"
-import comparisonAnalysis from './experiments/comaprison'
+import metricAnalysis from "./experiments/custom_metrics"
+import notedAnalysis from "./experiments/notes"
+import dataStoreAnalysis from "./experiments/data_store";
+
+let metricAnalyses: Analysis[] = [
+    metricAnalysis
+]
 
 let experimentAnalyses: Analysis[] = [
-    metricAnalysis,
-    comparisonAnalysis,
-    runConfigsAnalysis,
-    hyperPramsAnalysis,
-    gradientAnalysis,
-    parameterAnalysis,
-    moduleAnalysis,
+    notedAnalysis,
     stdOutAnalysis,
     stderrAnalysis,
-    loggerAnalysis
+    runConfigsAnalysis,
+    loggerAnalysis,
+    dataStoreAnalysis
 ]
 
 let sessionAnalyses: Analysis[] = [
@@ -49,5 +46,6 @@ let sessionAnalyses: Analysis[] = [
 
 export {
     experimentAnalyses,
-    sessionAnalyses
+    sessionAnalyses,
+    metricAnalyses
 }

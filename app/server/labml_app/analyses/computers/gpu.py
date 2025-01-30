@@ -1,15 +1,14 @@
-from typing import Dict, Any
-
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from labml_db import Model, Index
 from labml_db.serializer.pickle import PickleSerializer
+from typing import Dict, Any, List
 
-from labml_app.logger import logger
 from labml_app.enums import COMPUTEREnums
+from labml_app.logger import logger
 from ..analysis import Analysis
-from ..series import SeriesModel, Series
 from ..preferences import Preferences
+from ..series import SeriesModel, Series
 from ..series_collection import SeriesCollection
 
 
@@ -25,7 +24,44 @@ class GPUIndex(Index['GPU']):
 
 @Analysis.db_model(PickleSerializer, 'gpu_preferences')
 class GPUPreferencesModel(Model['GPUPreferencesModel'], Preferences):
-    pass
+    sub_series_preferences: Dict[str, List[int]]
+
+    @classmethod
+    def defaults(cls):
+        return dict(series_preferences=[],
+                    sub_series_preferences=dict(),
+                    chart_type=0,
+                    errors=[],
+                    step_range=[-1, -1],
+                    focus_smoothed=True
+                    )
+
+    def update_preferences(self, data: Dict[str, Any]) -> None:
+        if 'series_preferences' in data:
+            self.update_series_preferences(data['series_preferences'])
+
+        if 'sub_series_preferences' in data:
+            self.update_sub_series_preferences(data['sub_series_preferences'])
+
+        if 'chart_type' in data:
+            self.chart_type = data['chart_type']
+
+        self.save()
+
+    def update_sub_series_preferences(self, data: Dict[str, List[int]]) -> None:
+        for k, v in data.items():
+            self.sub_series_preferences[k] = v
+
+        self.save()
+
+    def get_data(self) -> Dict[str, Any]:
+        return {
+            'series_preferences': self.series_preferences,
+            'sub_series_preferences': self.sub_series_preferences,
+            'chart_type': self.chart_type,
+            'step_range': self.step_range,
+            'focus_smoothed': self.focus_smoothed
+        }
 
 
 @Analysis.db_index(PickleSerializer, 'gpu_preferences_index')
@@ -46,7 +82,7 @@ class GPUAnalysis(Analysis):
             if ind_type == COMPUTEREnums.GPU:
                 res[ind] = s
 
-        self.gpu.track(res)
+        self.gpu.track(res, keep_last_24h=True)
 
     def get_tracking(self):
         res = []
@@ -132,9 +168,9 @@ async def set_gpu_preferences(request: Request, session_uuid: str) -> Any:
     if not preferences_key:
         return {}
 
-    gp = preferences_key.load()
+    gp: GPUPreferencesModel = preferences_key.load()
     json = await request.json()
-    gp.update_sub_series_preferences(json)
+    gp.update_preferences(json)
 
     logger.debug(f'update gpu preferences: {gp.key}')
 

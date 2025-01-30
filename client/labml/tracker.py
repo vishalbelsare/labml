@@ -1,32 +1,6 @@
 from typing import Dict, overload, Optional
 
 from labml.internal.tracker import tracker_singleton as _internal
-from labml.internal.track_debug import tracker_debug_singleton as _tracker_debug_singleton
-
-
-@overload
-def debug(is_debug: bool):
-    ...
-
-
-@overload
-def debug(name: str):
-    ...
-
-
-@overload
-def debug(name: str, value: any):
-    ...
-
-
-def debug(*args):
-    if len(args) == 1:
-        if isinstance(args[0], bool):
-            _tracker_debug_singleton().is_debug = args[0]
-        else:
-            return _tracker_debug_singleton().get(args[0])
-    else:
-        _tracker_debug_singleton().store(args[0], args[1])
 
 
 def set_global_step(global_step: Optional[int]):
@@ -57,24 +31,6 @@ def get_global_step() -> int:
     return _internal().global_step
 
 
-def set_queue(name: str, queue_size: int = 10, is_print: bool = False):
-    """
-    Set indicator type to be a queue. This will maintain a queue of size ``queue_size``
-    to store the tracked values.
-    A histogram of the queue contents and stats like mean will be logged.
-
-    This is useful when we want to track statistics like moving average.
-
-    Arguments:
-        name (str): Name of the indicator
-        queue_size (int, optional): Size of the queue. Defaults to ``10``.
-        is_print: (bool, optional): Whether the indicator should be printed in console.
-            Defaults to ``False``.
-    """
-    from labml.internal.tracker.indicators.numeric import Queue
-    _internal().add_indicator(Queue(name, queue_size, is_print))
-
-
 def set_histogram(name: str, is_print: bool = False):
     """
     Set indicator type to be a histogram.
@@ -102,72 +58,6 @@ def set_scalar(name: str, is_print: bool = False):
     """
     from labml.internal.tracker.indicators.numeric import Scalar
     _internal().add_indicator(Scalar(name, is_print))
-
-
-def set_indexed_scalar(name: str):
-    """
-    Set indicator type to be an indexed scalar.
-    It will log pairs of values (index, value).
-
-    Arguments:
-        name (str): Name of the indicator
-    """
-    from labml.internal.tracker.indicators.indexed import IndexedScalar
-    _internal().add_indicator(IndexedScalar(name))
-
-
-def set_image(name: str, is_print: bool = False, density: Optional[float] = None):
-    """
-    Set indicator type to be an image.
-
-    Arguments:
-        name (str): Name of the indicator
-        is_print: (bool, optional): Whether to show the image with ``matplotlib``.
-            Defaults to ``False``.
-        density: (float, optional): This controls how often to log images.
-    """
-    from labml.internal.tracker.indicators.artifacts import Image
-    _internal().add_indicator(Image(name, is_print, density))
-
-
-def set_text(name: str, is_print: bool = False):
-    """
-    Set indicator type to be text (a string).
-
-    Arguments:
-        name (str): Name of the indicator
-        is_print: (bool, optional): Whether to show the image with ``matplotlib``.
-            Defaults to ``False``.
-    """
-    from labml.internal.tracker.indicators.artifacts import Text
-    _internal().add_indicator(Text(name, is_print))
-
-
-def set_tensor(name: str, is_once: bool = False):
-    """
-    Set indicator type to be a tensor.
-
-    Arguments:
-        name (str): Name of the indicator
-        is_once: (bool, optional): Whether this is tracked once only
-    """
-    from labml.internal.tracker.indicators.artifacts import Tensor
-    _internal().add_indicator(Tensor(name, is_once=is_once))
-
-
-def set_indexed_text(name: str, title: Optional[str] = None, is_print: bool = False):
-    """
-    Set indicator type to be an indexed text.
-    It will log (index, text) pairs.
-
-    Arguments:
-        name (str): Name of the indicator
-        title (str): Title to display
-        is_print: (bool, optional): Whether to show the image with ``matplotlib``.
-            Defaults to ``False``.
-    """
-    from labml.internal.tracker.indicators.artifacts import IndexedText
-    _internal().add_indicator(IndexedText(name, title, is_print))
 
 
 def _add_dict(values: Dict[str, any]):
@@ -303,10 +193,7 @@ def save(*args, **kwargs):
     .. function:: save(global_step: int, **kwargs: any)
         :noindex:
 
-    This saves the tracking information in all the writers
-    such as `labml.ai monitoring app <https://github.com/labmlai/labml/tree/master/app>`_,
-    `TensorBoard <https://www.tensorflow.org/tensorboard>`_ and
-    `Weights and Biases <https://wandb.ai/>`_.
+    This saves the tracking information.
 
     Arguments:
         global_step (int): The current step
